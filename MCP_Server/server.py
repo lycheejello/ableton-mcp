@@ -390,6 +390,84 @@ def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) ->
         return f"Error setting clip name: {str(e)}"
 
 @mcp.tool()
+def list_devices(ctx: Context, track_index: int) -> str:
+    """
+    List the devices on a track.
+
+    Parameters:
+    - track_index: The index of the track
+
+    Returns JSON with each device's index, name, class_name, and type.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("list_devices", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error listing devices: {str(e)}")
+        return f"Error listing devices: {str(e)}"
+
+@mcp.tool()
+def get_device_parameters(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Get the parameters of a device on a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - device_index: The index of the device on that track (use list_devices to find it)
+
+    Returns JSON with each parameter's index, name, value, min, max, is_quantized,
+    and value_items (list of label strings if the parameter is quantized, else null).
+    For VST/AU plugins, parameter names may be opaque (e.g. "Param 17") if the
+    plugin doesn't expose them to Live.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_device_parameters", {
+            "track_index": track_index,
+            "device_index": device_index,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting device parameters: {str(e)}")
+        return f"Error getting device parameters: {str(e)}"
+
+@mcp.tool()
+def set_device_parameter(
+    ctx: Context,
+    track_index: int,
+    device_index: int,
+    parameter_index: int,
+    value: float,
+) -> str:
+    """
+    Set a single device parameter by index.
+
+    Parameters:
+    - track_index: The index of the track
+    - device_index: The index of the device on that track
+    - parameter_index: The index of the parameter (from get_device_parameters)
+    - value: The new value. For continuous parameters, must be within [min, max].
+      For quantized parameters (is_quantized=True), pass the integer index into
+      value_items.
+
+    Parameter ordering for plugins is not guaranteed across plugin versions —
+    call get_device_parameters first; do not cache indices across sessions.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_device_parameter", {
+            "track_index": track_index,
+            "device_index": device_index,
+            "parameter_index": parameter_index,
+            "value": value,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting device parameter: {str(e)}")
+        return f"Error setting device parameter: {str(e)}"
+
+@mcp.tool()
 def set_tempo(ctx: Context, tempo: float) -> str:
     """
     Set the tempo of the Ableton session.
