@@ -27,6 +27,8 @@ _MODIFYING_COMMANDS = frozenset({
     "set_arrangement_clip_markers", "delete_arrangement_clip",
     "set_arrangement_loop", "clear_clip_notes", "replace_clip_notes",
     "add_clip_envelope_point", "clear_clip_envelope",
+    "set_transport_position", "save_session", "save_session_as",
+    "delete_session_clip",
 })
 
 @dataclass
@@ -498,14 +500,67 @@ def stop_clip(ctx: Context, track_index: int, clip_index: int) -> str:
     return _forward("stop_clip", {"track_index": track_index, "clip_index": clip_index})
 
 @mcp.tool()
-def start_playback(ctx: Context) -> str:
-    """Start playing the Ableton session."""
-    return _forward("start_playback")
+def start_playback(ctx: Context, from_beats: float = None) -> str:
+    """
+    Start playing the Ableton session.
+
+    Parameters:
+    - from_beats: optional arrangement-time position (in beats) to scrub to
+      before starting playback. Omit to play from Live's current cursor.
+    """
+    params = {}
+    if from_beats is not None:
+        params["from_beats"] = from_beats
+    return _forward("start_playback", params)
 
 @mcp.tool()
 def stop_playback(ctx: Context) -> str:
     """Stop playing the Ableton session."""
     return _forward("stop_playback")
+
+@mcp.tool()
+def set_transport_position(ctx: Context, beats: float) -> str:
+    """
+    Move the arrangement cursor to a beat position without starting playback.
+
+    Pair with start_playback for "play from beat N" workflows; or use
+    start_playback(from_beats=...) directly to do both in one call.
+    """
+    return _forward("set_transport_position", {"beats": beats})
+
+@mcp.tool()
+def save_session(ctx: Context) -> str:
+    """
+    Save the current Live set to its existing path.
+
+    Fails for unsaved/untitled sets — use save_session_as(path) for those.
+    """
+    return _forward("save_session")
+
+@mcp.tool()
+def save_session_as(ctx: Context, path: str) -> str:
+    """
+    Save the current Live set to a new path.
+
+    Parameters:
+    - path: absolute filesystem path. Should end in .als. Live's Python LOM
+      doesn't expose save-as on every version; this surfaces a clear error
+      if the API is missing.
+    """
+    return _forward("save_session_as", {"path": path})
+
+@mcp.tool()
+def delete_session_clip(ctx: Context, track_index: int, clip_slot_index: int) -> str:
+    """
+    Delete the clip in a session clip slot, leaving the slot empty.
+
+    Symmetry with delete_arrangement_clip. No-op (returns deleted=False) if
+    the slot is already empty.
+    """
+    return _forward("delete_session_clip", {
+        "track_index": track_index,
+        "clip_slot_index": clip_slot_index,
+    })
 
 @mcp.tool()
 def get_browser_tree(ctx: Context, category_type: str = "all") -> str:

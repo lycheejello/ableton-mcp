@@ -238,8 +238,12 @@ class AbletonMCP(ControlSurface):
             "set_tempo":                       (True, lambda p: s._set_tempo(p.get("tempo", 120.0))),
             "fire_clip":                       (True, lambda p: s._fire_clip(p.get("track_index", 0), p.get("clip_index", 0))),
             "stop_clip":                       (True, lambda p: s._stop_clip(p.get("track_index", 0), p.get("clip_index", 0))),
-            "start_playback":                  (True, lambda p: s._start_playback()),
+            "start_playback":                  (True, lambda p: s._start_playback(p.get("from_beats"))),
             "stop_playback":                   (True, lambda p: s._stop_playback()),
+            "set_transport_position":          (True, lambda p: s._set_transport_position(p.get("beats", 0.0))),
+            "save_session":                    (True, lambda p: s._save_session()),
+            "save_session_as":                 (True, lambda p: s._save_session_as(p.get("path", ""))),
+            "delete_session_clip":             (True, lambda p: s._delete_session_clip(p.get("track_index", 0), p.get("clip_slot_index", 0))),
             "load_browser_item":               (True, lambda p: s._load_browser_item(p.get("track_index", 0), p.get("item_uri", ""))),
             "set_device_parameter":            (True, lambda p: s._set_device_parameter(p.get("track_index", 0), p.get("device_index", 0), p.get("parameter_index", 0), p.get("value"))),
             "add_session_clip_to_arrangement": (True, lambda p: s._add_session_clip_to_arrangement(p.get("track_index", 0), p.get("session_clip_index", 0), p.get("position", 0.0))),
@@ -895,30 +899,90 @@ class AbletonMCP(ControlSurface):
             raise
     
     
-    def _start_playback(self):
-        """Start playing the session"""
+    def _start_playback(self, from_beats=None):
+        """Start playing. If from_beats is given, scrub the arrangement cursor first."""
         try:
+            if from_beats is not None:
+                if from_beats < 0:
+                    raise ValueError("from_beats must be >= 0")
+                self._song.current_song_time = float(from_beats)
             self._song.start_playing()
-            
-            result = {
-                "playing": self._song.is_playing
-            }
-            return result
+            return {"playing": self._song.is_playing, "song_time": self._song.current_song_time}
         except Exception as e:
             self.log_message("Error starting playback: " + str(e))
             raise
-    
+
     def _stop_playback(self):
         """Stop playing the session"""
         try:
             self._song.stop_playing()
-            
+
             result = {
                 "playing": self._song.is_playing
             }
             return result
         except Exception as e:
             self.log_message("Error stopping playback: " + str(e))
+            raise
+
+    def _set_transport_position(self, beats):
+        """Move the arrangement cursor to a given beat position."""
+        try:
+            if beats < 0:
+                raise ValueError("beats must be >= 0")
+            self._song.current_song_time = float(beats)
+            return {"song_time": self._song.current_song_time}
+        except Exception as e:
+            self.log_message("Error setting transport position: " + str(e))
+            raise
+
+    def _save_session(self):
+        """Save the current Live set to its existing path. Fails for unsaved sets."""
+        try:
+            try:
+                self._song.save_song()
+            except AttributeError:
+                raise Exception("Song.save_song is not available in this Live version")
+            except RuntimeError as e:
+                # Live raises RuntimeError for untitled sets ("set has no path yet").
+                raise Exception("Cannot save: set has no path yet. Use save_session_as(path) instead. ({0})".format(e))
+            return {"saved": True}
+        except Exception as e:
+            self.log_message("Error saving session: " + str(e))
+            raise
+
+    def _save_session_as(self, path):
+        """Save the current Live set to a new path. path must be absolute and end in .als."""
+        try:
+            if not path:
+                raise ValueError("path is required")
+            song = self._song
+            # Live's Python LOM doesn't expose a documented save-as on Song in all
+            # versions; try a few names and surface a clear error if none exist.
+            saver = getattr(song, "save_song_as", None) or getattr(song, "save_as", None)
+            if saver is None:
+                raise Exception("No save-as API on Song in this Live version (tried save_song_as, save_as)")
+            saver(path)
+            return {"saved": True, "path": path}
+        except Exception as e:
+            self.log_message("Error saving session as: " + str(e))
+            raise
+
+    def _delete_session_clip(self, track_index, clip_slot_index):
+        """Delete the clip in a session clip slot, leaving the slot empty."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if clip_slot_index < 0 or clip_slot_index >= len(track.clip_slots):
+                raise IndexError("Clip slot index out of range")
+            slot = track.clip_slots[clip_slot_index]
+            if not slot.has_clip:
+                return {"deleted": False, "reason": "slot was already empty"}
+            slot.delete_clip()
+            return {"deleted": True, "track_index": track_index, "clip_slot_index": clip_slot_index}
+        except Exception as e:
+            self.log_message("Error deleting session clip: " + str(e))
             raise
     
     def _get_browser_item(self, uri, path):
