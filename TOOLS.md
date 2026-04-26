@@ -28,6 +28,12 @@ or deleted — re-list before mutating.
 | `get_track_info` | `(track_index)` | Track name, mute/solo/arm, volume/pan, clip slots, devices. |
 | `create_midi_track` | `(index: int = -1)` | Insert a MIDI track (-1 = end of list). |
 | `set_track_name` | `(track_index, name)` | Rename a track. |
+| `set_track_volume` | `(track_index, value: float)` | Mixer volume, 0.0–1.0 (0.85 ≈ 0 dB). |
+| `set_track_pan` | `(track_index, value: float)` | Pan, -1.0–1.0; 0.0 = center. |
+| `set_track_mute` | `(track_index, mute: bool)` | Set the mute flag. |
+| `set_track_solo` | `(track_index, solo: bool)` | Set the solo flag. |
+| `set_master_volume` | `(value: float)` | Master volume, 0.0–1.0. |
+| `set_master_pan` | `(value: float)` | Master pan, -1.0–1.0. |
 
 ## Session clips
 
