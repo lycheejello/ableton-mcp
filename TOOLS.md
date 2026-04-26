@@ -56,6 +56,7 @@ or deleted — re-list before mutating.
 | Tool | Signature | Purpose |
 | --- | --- | --- |
 | `add_notes_to_clip` | `(track_index, clip_index, notes)` | Append notes to a session clip. |
+| `get_clip_notes` | `(track_index, clip_index, is_arrangement=False)` | Read existing notes from a clip — round-trip verification. |
 | `replace_clip_notes` | `(track_index, clip_index, notes, is_arrangement=False)` | Replace all notes on a clip. |
 | `clear_clip_notes` | `(track_index, clip_index, is_arrangement=False)` | Wipe all notes; clip stays. |
 

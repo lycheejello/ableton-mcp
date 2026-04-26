@@ -382,6 +382,26 @@ def add_notes_to_clip(
     })
 
 @mcp.tool()
+def get_clip_notes(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    is_arrangement: bool = False,
+) -> str:
+    """
+    Read MIDI notes from a clip.
+
+    Returns {note_count, notes: [{pitch, start_time, duration, velocity, mute}, ...]}.
+    Works for session clips (default) and arrangement clips (is_arrangement=True).
+    Useful for round-trip verification after add_notes_to_clip / replace_clip_notes.
+    """
+    return _forward("get_clip_notes", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "is_arrangement": is_arrangement,
+    })
+
+@mcp.tool()
 def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) -> str:
     """
     Set the name of a clip.
