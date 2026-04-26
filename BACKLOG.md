@@ -41,17 +41,17 @@ disjoint sets only.
       part of this work.
       Scope: server + remote-script (LOM research-heavy)
 
-- [ ] **Audio render** — `render_audio(path, length_beats)`. Needs Live 12
-      `Live.Application.Application.render_to_file` (or equivalent — verify
-      in target Live build). File-write means the audit policy bar is higher.
+- [ ] **Audio render** — `render_audio(path, length_beats)`. Target is Live
+      12; use `Live.Application.Application.render_to_file` directly (no
+      version probing). File-write means the audit policy bar is higher.
       Last because drift-01 can bounce by hand once.
       Scope: server + remote-script
 
-- [ ] **Verify `save_session_as` actually works in the target Live build.**
-      Implementation probes `Song.save_song_as` then `Song.save_as`; if neither
-      exists in this Live's Python LOM (likely — save-as is often
-      Application-side, not Song-side), surface a clearer fallback path or
-      gate the tool out. lofi-01 will exercise it.
+- [ ] **Fix `save_session_as` for Live 12.** Current impl probes
+      `Song.save_song_as` / `Song.save_as` — both wrong; in Live 12 save-as
+      is Application-side, not Song-side. Replace the getattr probe with
+      the documented Live 12 Application call directly. lofi-01 will
+      exercise it.
       Scope: remote-script (server signature stable)
 
 - [ ] **VST3 plugin loading by browser URI fails.** During lofi-01,
