@@ -67,15 +67,6 @@ disjoint sets only.
       error than "not found."
       Scope: remote-script (browser/loader investigation; server unchanged)
 
-- [claimed: claude-transport 2026-04-26] **`get_transport_state` (read playback / position).** No way to
-      check if Live is playing, current beat, looping state, etc. During
-      lofi-01 we wasted time chasing silent playback that turned out to
-      be the transport stopped — no API feedback. Acceptance: returns
-      `{is_playing, current_beat, loop_start, loop_end, loop_enabled,
-      tempo}` (or similar). Pairs with the existing `start_playback` /
-      `stop_playback` setters.
-      Scope: server + remote-script
-
 - [ ] **`get_clip_notes` (read existing notes from a clip).** Currently the
       MCP can write notes (`add_notes_to_clip`, `replace_clip_notes`) and
       read automation (`get_clip_envelope`), but cannot read notes back.
@@ -137,6 +128,9 @@ disjoint sets only.
   Remote Script loader path and uvx archive cache for no real gain.
 
 ## Done (recent)
+
+- 2026-04-26 — `get_transport_state` (playback state, current beat, tempo,
+  loop region) — closes the lofi-01 silent-playback diagnosis gap.
 
 - 2026-04-25 — #6 registry-pattern dispatcher; #7 TOOLS.md cheatsheet;
   `delete_session_clip`, `set_transport_position`, `start_playback(from_beats)`,
