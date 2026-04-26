@@ -2,6 +2,7 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 from _Framework.ControlSurface import ControlSurface
+import Live
 import socket
 import json
 import threading
@@ -645,43 +646,57 @@ class AbletonMCP(ControlSurface):
         self._song.loop_length = length_beats
         return {"loop_start": self._song.loop_start, "loop_length": self._song.loop_length}
 
+    def _build_note_specs(self, notes):
+        """Convert input dicts to Live.Clip.MidiNoteSpecification tuple."""
+        specs = []
+        for note in notes:
+            specs.append(Live.Clip.MidiNoteSpecification(
+                pitch=note.get("pitch", 60),
+                start_time=note.get("start_time", 0.0),
+                duration=note.get("duration", 0.25),
+                velocity=note.get("velocity", 100),
+                mute=note.get("mute", False),
+            ))
+        return tuple(specs)
+
+    def _remove_all_notes(self, clip):
+        """Wipe every MIDI note in a clip via the Live 11+ extended API."""
+        # remove_notes_extended(from_pitch, pitch_span, from_time, time_span)
+        clip.remove_notes_extended(0, 128, 0.0, max(clip.length, 1.0))
+
     def _clear_clip_notes(self, track_index, clip_index, is_arrangement):
         _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
         if not clip.is_midi_clip:
             raise Exception("Clip is not a MIDI clip")
-        # set_notes() *adds* in Live 12 — it does not replace. The canonical
-        # "remove all" idiom is select_all_notes + replace_selected_notes(()).
-        clip.select_all_notes()
-        clip.replace_selected_notes(tuple())
+        self._remove_all_notes(clip)
         return {"cleared": True}
 
     def _replace_clip_notes(self, track_index, clip_index, notes, is_arrangement):
         _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
         if not clip.is_midi_clip:
             raise Exception("Clip is not a MIDI clip")
-        live_notes = []
-        for note in notes:
-            live_notes.append((
-                note.get("pitch", 60),
-                note.get("start_time", 0.0),
-                note.get("duration", 0.25),
-                note.get("velocity", 100),
-                note.get("mute", False),
-            ))
-        clip.select_all_notes()
-        clip.replace_selected_notes(tuple(live_notes))
-        return {"note_count": len(live_notes)}
+        self._remove_all_notes(clip)
+        specs = self._build_note_specs(notes)
+        if specs:
+            clip.add_new_notes(specs)
+        return {"note_count": len(specs)}
 
     def _get_clip_notes(self, track_index, clip_index, is_arrangement):
         _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
         if not clip.is_midi_clip:
             raise Exception("Clip is not a MIDI clip")
-        # get_notes(from_time, from_pitch, time_span, pitch_span) returns a tuple of
-        # (pitch, start_time, duration, velocity, muted) tuples.
-        raw = clip.get_notes(0.0, 0, clip.length, 128)
+        # get_notes_extended(from_pitch, pitch_span, from_time, time_span)
+        # returns objects with pitch, start_time, duration, velocity, mute, note_id.
+        raw = clip.get_notes_extended(0, 128, 0.0, max(clip.length, 1.0))
         notes = [
-            {"pitch": p, "start_time": t, "duration": d, "velocity": v, "mute": bool(m)}
-            for (p, t, d, v, m) in raw
+            {
+                "pitch": n.pitch,
+                "start_time": n.start_time,
+                "duration": n.duration,
+                "velocity": n.velocity,
+                "mute": bool(n.mute),
+            }
+            for n in raw
         ]
         return {"note_count": len(notes), "notes": notes}
 
@@ -803,41 +818,21 @@ class AbletonMCP(ControlSurface):
             raise
     
     def _add_notes_to_clip(self, track_index, clip_index, notes):
-        """Add MIDI notes to a clip"""
+        """Append MIDI notes to a clip using the Live 11+ extended API."""
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
-            
             track = self._song.tracks[track_index]
-            
             if clip_index < 0 or clip_index >= len(track.clip_slots):
                 raise IndexError("Clip index out of range")
-            
             clip_slot = track.clip_slots[clip_index]
-            
             if not clip_slot.has_clip:
                 raise Exception("No clip in slot")
-            
             clip = clip_slot.clip
-            
-            # Convert note data to Live's format
-            live_notes = []
-            for note in notes:
-                pitch = note.get("pitch", 60)
-                start_time = note.get("start_time", 0.0)
-                duration = note.get("duration", 0.25)
-                velocity = note.get("velocity", 100)
-                mute = note.get("mute", False)
-                
-                live_notes.append((pitch, start_time, duration, velocity, mute))
-            
-            # Add the notes
-            clip.set_notes(tuple(live_notes))
-            
-            result = {
-                "note_count": len(notes)
-            }
-            return result
+            specs = self._build_note_specs(notes)
+            if specs:
+                clip.add_new_notes(specs)
+            return {"note_count": len(specs)}
         except Exception as e:
             self.log_message("Error adding notes to clip: " + str(e))
             raise
