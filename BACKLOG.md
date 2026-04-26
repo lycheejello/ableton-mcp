@@ -67,31 +67,6 @@ disjoint sets only.
       error than "not found."
       Scope: remote-script (browser/loader investigation; server unchanged)
 
-- [claimed: claude-clipnotes 2026-04-26] **`get_clip_notes` (read existing notes from a clip).** Currently the
-      MCP can write notes (`add_notes_to_clip`, `replace_clip_notes`) and
-      read automation (`get_clip_envelope`), but cannot read notes back.
-      That makes round-trip verification and bug diagnosis nearly impossible
-      — when the user reports unexpected note content, the only path is to
-      ask them to eyeball Live's UI. Acceptance: tool returns `[{pitch,
-      start_time, duration, velocity, mute}, ...]` for both session and
-      arrangement clips. Useful for debugging the `clear_clip_notes` no-op
-      issue below.
-      Scope: server + remote-script
-
-- [claimed: claude-clipnotes 2026-04-26] **`clear_clip_notes` silently no-ops on session clips.** Hit during
-      lofi-01 (2026-04-25): tool returned `{"cleared": true}` but the clip
-      retained all prior notes. Subsequent `add_notes_to_clip` then stacked on
-      top of the un-cleared notes, producing phase-cancellation transients
-      that read as click artifacts on each beat. Same likely affects
-      `replace_clip_notes` (which presumably clears + adds internally).
-      Acceptance: clearing a session-clip's notes via MCP empties the clip
-      in Live's UI, verified by user re-firing the clip and seeing/hearing
-      no residual notes; `replace_clip_notes` round-trip leaves exactly the
-      passed-in note set. Workaround in the meantime: create a fresh clip
-      in a different slot.
-      Scope: remote-script (bug likely in clip-note handler; depends on
-      `get_clip_notes` for a clean repro)
-
 - [ ] **NDJSON framing + drop the modifying-command sleeps.** Current
       transport (JSON over TCP localhost:9877) frames messages by
       heuristic: read chunks, try `json.loads` after each, treat
@@ -128,6 +103,13 @@ disjoint sets only.
   Remote Script loader path and uvx archive cache for no real gain.
 
 ## Done (recent)
+
+- 2026-04-26 — `get_clip_notes` for round-trip note verification; fixed
+  `clear_clip_notes` / `replace_clip_notes` no-op bug by porting all
+  MIDI-note handlers (incl. `add_notes_to_clip`) to the Live 11+ extended
+  API (`add_new_notes` / `remove_notes_extended` / `get_notes_extended` /
+  `MidiNoteSpecification`). Old `set_notes` / `select_all_notes` /
+  `replace_selected_notes` paths surfaced Live's "older process" warning.
 
 - 2026-04-26 — `get_transport_state` (playback state, current beat, tempo,
   loop region) — closes the lofi-01 silent-playback diagnosis gap.
