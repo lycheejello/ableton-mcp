@@ -2,6 +2,27 @@
 
 Fork-development TODOs. Music-production work lives in the consuming repo.
 
+## Claiming items (for parallel agents)
+
+To avoid stepping on each other, agents working in parallel must claim before
+editing code. Protocol:
+
+1. `git pull --rebase origin main` — get latest claim state.
+2. Pick an unclaimed `- [ ]` item whose file scope doesn't overlap an
+   in-progress claim (see "Scope" below each item, when present).
+3. Change `- [ ]` to `- [claimed: <agent-id> YYYY-MM-DD]` on that line and
+   commit *just that edit* directly to main with message
+   `claim: <short item title>`. Push immediately.
+4. If the push rejects (someone else claimed first), rebase, pick a different
+   item, retry.
+5. Do the work on a branch `agent/<agent-id>/<slug>`, open a PR.
+6. On merge, replace the claim line with `- [x]` and move to "Done (recent)".
+7. If abandoning, revert the claim line back to `- [ ]` in a single commit.
+
+Scope tags (`Scope: server | remote-script | docs | transport`) on items below
+indicate which files an agent will touch — use them to parallelize across
+disjoint sets only.
+
 ## Open
 
 - [ ] **Arrangement-view automation (track-lane + per-clip)** — supersedes the
@@ -18,31 +39,20 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       audible fades. The current `is_arrangement=True` arg on the envelope
       tools is wired but errors at the LOM layer — repurpose or replace as
       part of this work.
+      Scope: server + remote-script (LOM research-heavy)
 
 - [ ] **Audio render** — `render_audio(path, length_beats)`. Needs Live 12
       `Live.Application.Application.render_to_file` (or equivalent — verify
       in target Live build). File-write means the audit policy bar is higher.
       Last because drift-01 can bounce by hand once.
+      Scope: server + remote-script
 
 - [ ] **Verify `save_session_as` actually works in the target Live build.**
       Implementation probes `Song.save_song_as` then `Song.save_as`; if neither
       exists in this Live's Python LOM (likely — save-as is often
       Application-side, not Song-side), surface a clearer fallback path or
       gate the tool out. lofi-01 will exercise it.
-
-- [ ] **Track-mixer setters: `set_track_volume`, `set_track_mute`,
-      `set_track_solo`, `set_track_pan`.** Currently `get_track_info` reads
-      these (volume, mute, solo, panning) but no setters exist, so the only
-      level control is at the device tail. Hit hard during lofi-01 mixing:
-      drum/keys/bass balance had to be solved by pushing instrument-level
-      gain instead of fader, and a stuck solo on the Bass track couldn't be
-      cleared via MCP. Acceptance: each setter round-trips through
-      `get_track_info` and matches the Live UI; mute/solo accept booleans;
-      volume/pan accept the Live-native float ranges.
-
-- [ ] **Master-track setters: `set_master_volume`, `set_master_pan`.**
-      Same shape as the track setters above. `get_session_info` already
-      surfaces master state; complete the read/write pair.
+      Scope: remote-script (server signature stable)
 
 - [ ] **VST3 plugin loading by browser URI fails.** During lofi-01,
       `get_browser_items_at_path("plugins/u-he")` returned Diva with
@@ -55,6 +65,7 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       LOM call really doesn't accept plugin URIs, document that and either
       provide an alternate path (e.g. by file path) or surface a clearer
       error than "not found."
+      Scope: remote-script (browser/loader investigation; server unchanged)
 
 - [ ] **`get_transport_state` (read playback / position).** No way to
       check if Live is playing, current beat, looping state, etc. During
@@ -63,6 +74,7 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       `{is_playing, current_beat, loop_start, loop_end, loop_enabled,
       tempo}` (or similar). Pairs with the existing `start_playback` /
       `stop_playback` setters.
+      Scope: server + remote-script
 
 - [ ] **`get_clip_notes` (read existing notes from a clip).** Currently the
       MCP can write notes (`add_notes_to_clip`, `replace_clip_notes`) and
@@ -73,6 +85,7 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       start_time, duration, velocity, mute}, ...]` for both session and
       arrangement clips. Useful for debugging the `clear_clip_notes` no-op
       issue below.
+      Scope: server + remote-script
 
 - [ ] **`clear_clip_notes` silently no-ops on session clips.** Hit during
       lofi-01 (2026-04-25): tool returned `{"cleared": true}` but the clip
@@ -85,6 +98,8 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       no residual notes; `replace_clip_notes` round-trip leaves exactly the
       passed-in note set. Workaround in the meantime: create a fresh clip
       in a different slot.
+      Scope: remote-script (bug likely in clip-note handler; depends on
+      `get_clip_notes` for a clean repro)
 
 - [ ] **NDJSON framing + drop the modifying-command sleeps.** Current
       transport (JSON over TCP localhost:9877) frames messages by
@@ -101,6 +116,9 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       guarantees the response only fires after the main-thread task
       completes). Wins: 200ms off every modifying call, robust framing,
       ~20 LOC simpler.
+      Scope: transport (server send/receive + remote-script socket handler).
+      EXCLUSIVE: blocks all other server.py + remote-script work while
+      in-flight — coordinate, do not parallelize.
 
 - [ ] **Switch TCP → Unix domain socket** (after NDJSON lands). Trivial
       swap: `AF_INET`/`(host, port)` → `AF_UNIX`/`/tmp/abletonmcp.sock`.
@@ -109,6 +127,7 @@ Fork-development TODOs. Music-production work lives in the consuming repo.
       prompts. Cost: lose `nc localhost 9877` debugging in favor of
       `nc -U /tmp/abletonmcp.sock`. Defer until after NDJSON since
       changing framing and transport in the same commit muddles the diff.
+      Scope: transport. EXCLUSIVE with NDJSON item; sequence after.
 
 ## Won't do
 
