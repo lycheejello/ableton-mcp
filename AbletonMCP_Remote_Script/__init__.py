@@ -235,6 +235,12 @@ class AbletonMCP(ControlSurface):
             # State-modifying (main thread)
             "create_midi_track":               (True, lambda p: s._create_midi_track(p.get("index", -1))),
             "set_track_name":                  (True, lambda p: s._set_track_name(p.get("track_index", 0), p.get("name", ""))),
+            "set_track_volume":                (True, lambda p: s._set_track_volume(p.get("track_index", 0), p.get("value"))),
+            "set_track_pan":                   (True, lambda p: s._set_track_pan(p.get("track_index", 0), p.get("value"))),
+            "set_track_mute":                  (True, lambda p: s._set_track_mute(p.get("track_index", 0), p.get("mute", False))),
+            "set_track_solo":                  (True, lambda p: s._set_track_solo(p.get("track_index", 0), p.get("solo", False))),
+            "set_master_volume":               (True, lambda p: s._set_master_volume(p.get("value"))),
+            "set_master_pan":                  (True, lambda p: s._set_master_pan(p.get("value"))),
             "create_clip":                     (True, lambda p: s._create_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("length", 4.0))),
             "add_notes_to_clip":               (True, lambda p: s._add_notes_to_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []))),
             "set_clip_name":                   (True, lambda p: s._set_clip_name(p.get("track_index", 0), p.get("clip_index", 0), p.get("name", ""))),
@@ -775,17 +781,90 @@ class AbletonMCP(ControlSurface):
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
-            
+
             # Set the name
             track = self._song.tracks[track_index]
             track.name = name
-            
+
             result = {
                 "name": track.name
             }
             return result
         except Exception as e:
             self.log_message("Error setting track name: " + str(e))
+            raise
+
+    def _get_track_or_raise(self, track_index):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        return self._song.tracks[track_index]
+
+    def _set_mixer_param(self, mixer_param, value):
+        """Assign a Live mixer DeviceParameter, validating range. Returns the readback."""
+        if value is None:
+            raise ValueError("value is required")
+        v = float(value)
+        if not (mixer_param.min <= v <= mixer_param.max):
+            raise ValueError("value {0} out of range [{1}, {2}]".format(v, mixer_param.min, mixer_param.max))
+        mixer_param.value = v
+        return mixer_param.value
+
+    def _set_track_volume(self, track_index, value):
+        """Set track mixer volume (Live native float, 0.0–1.0; 0.85 ≈ 0dB)."""
+        try:
+            track = self._get_track_or_raise(track_index)
+            new_value = self._set_mixer_param(track.mixer_device.volume, value)
+            return {"track_index": track_index, "volume": new_value}
+        except Exception as e:
+            self.log_message("Error setting track volume: " + str(e))
+            raise
+
+    def _set_track_pan(self, track_index, value):
+        """Set track mixer panning (Live native float, -1.0–1.0)."""
+        try:
+            track = self._get_track_or_raise(track_index)
+            new_value = self._set_mixer_param(track.mixer_device.panning, value)
+            return {"track_index": track_index, "panning": new_value}
+        except Exception as e:
+            self.log_message("Error setting track pan: " + str(e))
+            raise
+
+    def _set_track_mute(self, track_index, mute):
+        """Set track mute flag."""
+        try:
+            track = self._get_track_or_raise(track_index)
+            track.mute = bool(mute)
+            return {"track_index": track_index, "mute": track.mute}
+        except Exception as e:
+            self.log_message("Error setting track mute: " + str(e))
+            raise
+
+    def _set_track_solo(self, track_index, solo):
+        """Set track solo flag."""
+        try:
+            track = self._get_track_or_raise(track_index)
+            track.solo = bool(solo)
+            return {"track_index": track_index, "solo": track.solo}
+        except Exception as e:
+            self.log_message("Error setting track solo: " + str(e))
+            raise
+
+    def _set_master_volume(self, value):
+        """Set master-track volume (Live native float, 0.0–1.0)."""
+        try:
+            new_value = self._set_mixer_param(self._song.master_track.mixer_device.volume, value)
+            return {"volume": new_value}
+        except Exception as e:
+            self.log_message("Error setting master volume: " + str(e))
+            raise
+
+    def _set_master_pan(self, value):
+        """Set master-track panning (Live native float, -1.0–1.0)."""
+        try:
+            new_value = self._set_mixer_param(self._song.master_track.mixer_device.panning, value)
+            return {"panning": new_value}
+        except Exception as e:
+            self.log_message("Error setting master pan: " + str(e))
             raise
     
     def _create_clip(self, track_index, clip_index, length):

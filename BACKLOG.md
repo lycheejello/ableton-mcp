@@ -114,6 +114,9 @@ disjoint sets only.
 - 2026-04-26 — `get_transport_state` (playback state, current beat, tempo,
   loop region) — closes the lofi-01 silent-playback diagnosis gap.
 
+- 2026-04-25 — track-mixer setters (`set_track_volume`, `set_track_pan`,
+  `set_track_mute`, `set_track_solo`) and master setters
+  (`set_master_volume`, `set_master_pan`).
 - 2026-04-25 — #6 registry-pattern dispatcher; #7 TOOLS.md cheatsheet;
   `delete_session_clip`, `set_transport_position`, `start_playback(from_beats)`,
   `save_session`, `save_session_as`; type-hint modernization to 3.10+;

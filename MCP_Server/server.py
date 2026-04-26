@@ -19,6 +19,8 @@ logger = logging.getLogger("AbletonMCPServer")
 # COMMANDS registry (AbletonMCP_Remote_Script/__init__.py).
 _MODIFYING_COMMANDS = frozenset({
     "create_midi_track", "create_audio_track", "set_track_name",
+    "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+    "set_master_volume", "set_master_pan",
     "create_clip", "add_notes_to_clip", "set_clip_name",
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
     "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -343,6 +345,70 @@ def set_track_name(ctx: Context, track_index: int, name: str) -> str:
     - name: The new name for the track
     """
     return _forward("set_track_name", {"track_index": track_index, "name": name})
+
+@mcp.tool()
+def set_track_volume(ctx: Context, track_index: int, value: float) -> str:
+    """
+    Set a track's mixer volume.
+
+    Parameters:
+    - track_index: The index of the track
+    - value: Live-native float, 0.0–1.0 (0.85 ≈ 0 dB, 1.0 = +6 dB)
+    """
+    return _forward("set_track_volume", {"track_index": track_index, "value": value})
+
+@mcp.tool()
+def set_track_pan(ctx: Context, track_index: int, value: float) -> str:
+    """
+    Set a track's mixer panning.
+
+    Parameters:
+    - track_index: The index of the track
+    - value: Live-native float, -1.0 (full left) to 1.0 (full right); 0.0 = center
+    """
+    return _forward("set_track_pan", {"track_index": track_index, "value": value})
+
+@mcp.tool()
+def set_track_mute(ctx: Context, track_index: int, mute: bool) -> str:
+    """
+    Set a track's mute flag.
+
+    Parameters:
+    - track_index: The index of the track
+    - mute: True to mute, False to unmute
+    """
+    return _forward("set_track_mute", {"track_index": track_index, "mute": mute})
+
+@mcp.tool()
+def set_track_solo(ctx: Context, track_index: int, solo: bool) -> str:
+    """
+    Set a track's solo flag.
+
+    Parameters:
+    - track_index: The index of the track
+    - solo: True to solo, False to clear
+    """
+    return _forward("set_track_solo", {"track_index": track_index, "solo": solo})
+
+@mcp.tool()
+def set_master_volume(ctx: Context, value: float) -> str:
+    """
+    Set the master track's volume.
+
+    Parameters:
+    - value: Live-native float, 0.0–1.0 (0.85 ≈ 0 dB, 1.0 = +6 dB)
+    """
+    return _forward("set_master_volume", {"value": value})
+
+@mcp.tool()
+def set_master_pan(ctx: Context, value: float) -> str:
+    """
+    Set the master track's panning.
+
+    Parameters:
+    - value: Live-native float, -1.0 (full left) to 1.0 (full right); 0.0 = center
+    """
+    return _forward("set_master_pan", {"value": value})
 
 @mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
