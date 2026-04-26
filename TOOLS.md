@@ -12,6 +12,7 @@ or deleted — re-list before mutating.
 | Tool | Signature | Purpose |
 | --- | --- | --- |
 | `get_session_info` | `()` | Tempo, time signature, track counts, master volume/pan. |
+| `get_transport_state` | `()` | Playback state, current beat, loop region — confirm what Live is actually doing. |
 | `set_tempo` | `(tempo: float)` | Set BPM. |
 | `start_playback` | `(from_beats: float = None)` | Start playing; optionally scrub the arrangement cursor first. |
 | `stop_playback` | `()` | Stop. |

@@ -221,6 +221,7 @@ class AbletonMCP(ControlSurface):
         return {
             # Read-only
             "get_session_info":          (False, lambda p: s._get_session_info()),
+            "get_transport_state":       (False, lambda p: s._get_transport_state()),
             "get_track_info":            (False, lambda p: s._get_track_info(p.get("track_index", 0))),
             "list_devices":              (False, lambda p: s._list_devices(p.get("track_index", 0))),
             "get_device_parameters":     (False, lambda p: s._get_device_parameters(p.get("track_index", 0), p.get("device_index", 0))),
@@ -318,7 +319,24 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error getting session info: " + str(e))
             raise
-    
+
+    def _get_transport_state(self):
+        """Read playback state, arrangement-cursor position, and loop region."""
+        try:
+            song = self._song
+            return {
+                "is_playing": song.is_playing,
+                "current_beat": song.current_song_time,
+                "tempo": song.tempo,
+                "loop_enabled": song.loop,
+                "loop_start": song.loop_start,
+                "loop_length": song.loop_length,
+                "loop_end": song.loop_start + song.loop_length,
+            }
+        except Exception as e:
+            self.log_message("Error getting transport state: " + str(e))
+            raise
+
     def _get_track_info(self, track_index):
         """Get information about a track"""
         try:
