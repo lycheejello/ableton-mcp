@@ -67,7 +67,7 @@ disjoint sets only.
       error than "not found."
       Scope: remote-script (browser/loader investigation; server unchanged)
 
-- [ ] **NDJSON framing + drop the modifying-command sleeps.** Current
+- [claimed: claude-ndjson 2026-04-26] **NDJSON framing + drop the modifying-command sleeps.** Current
       transport (JSON over TCP localhost:9877) frames messages by
       heuristic: read chunks, try `json.loads` after each, treat
       `JSONDecodeError` as "incomplete, keep reading"
