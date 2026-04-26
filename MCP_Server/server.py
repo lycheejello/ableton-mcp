@@ -301,6 +301,18 @@ def get_session_info(ctx: Context) -> str:
     return _forward("get_session_info")
 
 @mcp.tool()
+def get_transport_state(ctx: Context) -> str:
+    """
+    Read playback state, arrangement-cursor position, and loop region.
+
+    Returns is_playing, current_beat, tempo, loop_enabled, loop_start,
+    loop_length, loop_end. Pairs with start_playback / stop_playback /
+    set_transport_position when you need to confirm what Live is actually
+    doing rather than assuming.
+    """
+    return _forward("get_transport_state")
+
+@mcp.tool()
 def get_track_info(ctx: Context, track_index: int) -> str:
     """
     Get detailed information about a specific track in Ableton.
