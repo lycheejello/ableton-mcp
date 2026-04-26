@@ -1,8 +1,8 @@
-# ableton-mcp (huyson fork)
+# ableton-mcp
 
-A personal fork of [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) extending the MCP bridge between Claude and Ableton Live with read/write access to device parameters and Arrangement-view control.
+An MCP bridge between Claude and Ableton Live with read/write access to device parameters and Arrangement-view control, alongside the standard track/clip/transport/browser-load tools.
 
-Upstream tools (track creation, clip creation, transport, browser load, etc.) are unchanged. Run as a local `uvx` package; no network egress beyond the localhost socket to Ableton's Remote Script.
+Run as a local `uvx` package; no network egress beyond the localhost socket to Ableton's Remote Script.
 
 ## What this fork adds
 

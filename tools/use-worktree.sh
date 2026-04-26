@@ -3,13 +3,13 @@
 # Restart (or toggle) AbletonMCP in Live afterward to reload the module.
 #
 #   tools/use-worktree.sh                 # show current target
-#   tools/use-worktree.sh main            # main worktree (~/Develop/ableton-mcp)
+#   tools/use-worktree.sh main            # main worktree (~/Develop/scherzo/ableton-mcp)
 #   tools/use-worktree.sh <slug>          # ~/Develop/ableton-mcp-<slug>
 
 set -euo pipefail
 
 LIVE_LINK="$HOME/Music/Ableton/User Library/Remote Scripts/AbletonMCP/__init__.py"
-MAIN_TREE="$HOME/Develop/ableton-mcp"
+MAIN_TREE="$HOME/Develop/scherzo/ableton-mcp"
 
 if [[ ! -L "$LIVE_LINK" ]]; then
     echo "error: $LIVE_LINK is not a symlink" >&2
