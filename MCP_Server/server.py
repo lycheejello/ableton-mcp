@@ -105,7 +105,12 @@ class AbletonConnection:
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect"
+            "start_playback", "stop_playback", "load_instrument_or_effect",
+            "add_session_clip_to_arrangement", "create_arrangement_midi_clip",
+            "set_arrangement_clip_position", "set_arrangement_clip_loop",
+            "set_arrangement_clip_markers", "delete_arrangement_clip",
+            "set_arrangement_loop", "clear_clip_notes", "replace_clip_notes",
+            "add_clip_envelope_point", "clear_clip_envelope",
         ]
         
         try:
@@ -728,6 +733,294 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"
+
+# Arrangement-view tools ------------------------------------------------------
+
+@mcp.tool()
+def list_arrangement_clips(ctx: Context, track_index: int) -> str:
+    """
+    List clips on a track's arrangement timeline (not session clip slots).
+
+    Returns JSON with each arrangement clip's index, name, position (start time
+    in beats), end, length, looping/loop_start/loop_end, and is_audio/midi flags.
+    Indices are positional and SHIFT when clips are added or deleted — call this
+    immediately before mutating; do not cache.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("list_arrangement_clips", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error listing arrangement clips: {str(e)}")
+        return f"Error listing arrangement clips: {str(e)}"
+
+@mcp.tool()
+def add_session_clip_to_arrangement(
+    ctx: Context, track_index: int, session_clip_index: int, position: float
+) -> str:
+    """
+    Duplicate a session clip onto the arrangement timeline at a given beat position.
+
+    Parameters:
+    - track_index: track containing both the session clip and the arrangement timeline
+    - session_clip_index: clip slot index in the session view
+    - position: arrangement-time start position in beats
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("add_session_clip_to_arrangement", {
+            "track_index": track_index,
+            "session_clip_index": session_clip_index,
+            "position": position,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error adding session clip to arrangement: {str(e)}")
+        return f"Error adding session clip to arrangement: {str(e)}"
+
+@mcp.tool()
+def create_arrangement_midi_clip(
+    ctx: Context, track_index: int, start_time: float, end_time: float
+) -> str:
+    """
+    Create an empty MIDI clip on the arrangement timeline.
+
+    Parameters:
+    - track_index: target track (must be a MIDI track)
+    - start_time: beat position where the clip starts
+    - end_time: beat position where the clip ends (must be > start_time)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_arrangement_midi_clip", {
+            "track_index": track_index,
+            "start_time": start_time,
+            "end_time": end_time,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error creating arrangement MIDI clip: {str(e)}")
+        return f"Error creating arrangement MIDI clip: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_clip_position(
+    ctx: Context, track_index: int, arr_clip_index: int, position: float
+) -> str:
+    """
+    Move an arrangement clip to a new beat position. Other clips are NOT pushed —
+    Live will refuse if the new position would overlap another clip on the same track.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_clip_position", {
+            "track_index": track_index,
+            "arr_clip_index": arr_clip_index,
+            "position": position,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting arrangement clip position: {str(e)}")
+        return f"Error setting arrangement clip position: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_clip_loop(
+    ctx: Context, track_index: int, arr_clip_index: int,
+    loop_start: float, loop_end: float, looping: bool = True
+) -> str:
+    """
+    Set an arrangement clip's loop region (in clip-local beats) and looping flag.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_clip_loop", {
+            "track_index": track_index,
+            "arr_clip_index": arr_clip_index,
+            "loop_start": loop_start,
+            "loop_end": loop_end,
+            "looping": looping,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting arrangement clip loop: {str(e)}")
+        return f"Error setting arrangement clip loop: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_clip_markers(
+    ctx: Context, track_index: int, arr_clip_index: int,
+    start_marker: float, end_marker: float
+) -> str:
+    """
+    Set an arrangement clip's start/end markers (clip-local beats) — i.e. the
+    playable region within the clip. For audio clips, this is the trim region.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_clip_markers", {
+            "track_index": track_index,
+            "arr_clip_index": arr_clip_index,
+            "start_marker": start_marker,
+            "end_marker": end_marker,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting arrangement clip markers: {str(e)}")
+        return f"Error setting arrangement clip markers: {str(e)}"
+
+@mcp.tool()
+def delete_arrangement_clip(ctx: Context, track_index: int, arr_clip_index: int) -> str:
+    """Delete an arrangement clip. Indices of subsequent clips shift down by one."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_arrangement_clip", {
+            "track_index": track_index,
+            "arr_clip_index": arr_clip_index,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error deleting arrangement clip: {str(e)}")
+        return f"Error deleting arrangement clip: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_loop(ctx: Context, start_beats: float, length_beats: float) -> str:
+    """
+    Set the arrangement loop region (the loop brace shown above the timeline).
+    Doesn't enable the loop — use Live's transport for that.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_loop", {
+            "start_beats": start_beats,
+            "length_beats": length_beats,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting arrangement loop: {str(e)}")
+        return f"Error setting arrangement loop: {str(e)}"
+
+@mcp.tool()
+def clear_clip_notes(
+    ctx: Context, track_index: int, clip_index: int, is_arrangement: bool = False
+) -> str:
+    """
+    Remove all MIDI notes from a clip, leaving the clip itself in place.
+
+    Use this before add_notes_to_clip to truly replace notes — add_notes_to_clip
+    appends. Or use replace_clip_notes for the combined operation.
+
+    Parameters:
+    - is_arrangement: False = clip_index is a session clip slot (default);
+                      True  = clip_index is an arrangement-clip index
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("clear_clip_notes", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "is_arrangement": is_arrangement,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error clearing clip notes: {str(e)}")
+        return f"Error clearing clip notes: {str(e)}"
+
+@mcp.tool()
+def replace_clip_notes(
+    ctx: Context, track_index: int, clip_index: int,
+    notes: List[Dict[str, Union[int, float, bool]]],
+    is_arrangement: bool = False,
+) -> str:
+    """
+    Replace (not append) all notes in a MIDI clip with the given list.
+
+    Note format matches add_notes_to_clip: {pitch, start_time, duration, velocity, mute}.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("replace_clip_notes", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "notes": notes,
+            "is_arrangement": is_arrangement,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error replacing clip notes: {str(e)}")
+        return f"Error replacing clip notes: {str(e)}"
+
+@mcp.tool()
+def add_clip_envelope_point(
+    ctx: Context, track_index: int, clip_index: int,
+    parameter_path: str, time: float, value: float,
+) -> str:
+    """
+    Add a point to a SESSION clip's automation envelope for a mixer parameter.
+
+    parameter_path (v1):
+    - "volume"
+    - "panning" (or "pan")
+    - "send:N"  (e.g. "send:0" for return A)
+
+    Time is clip-local beats. Value is range-checked against the parameter's [min, max].
+    The envelope is created on first call; subsequent calls add more points.
+
+    v1 scope: session clips only. Arrangement-view mixer automation lives on the
+    track timeline lane (a different Live API surface) and is deferred to v2,
+    along with device-parameter automation (e.g. 'device:0:param:5').
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("add_clip_envelope_point", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "parameter_path": parameter_path,
+            "time": time,
+            "value": value,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error adding clip envelope point: {str(e)}")
+        return f"Error adding clip envelope point: {str(e)}"
+
+@mcp.tool()
+def clear_clip_envelope(
+    ctx: Context, track_index: int, clip_index: int,
+    parameter_path: str,
+) -> str:
+    """Remove all envelope points for one parameter on a session clip. (v1: session only)"""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("clear_clip_envelope", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "parameter_path": parameter_path,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error clearing clip envelope: {str(e)}")
+        return f"Error clearing clip envelope: {str(e)}"
+
+@mcp.tool()
+def get_clip_envelope(
+    ctx: Context, track_index: int, clip_index: int,
+    parameter_path: str,
+) -> str:
+    """
+    Inspect a session clip's automation envelope for a parameter. Returns sampled
+    values at integer-beat intervals across the clip — coarse, intended for sanity
+    checks rather than precise round-trips. Live's UI is the source of truth.
+    (v1: session only.)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_envelope", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "parameter_path": parameter_path,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip envelope: {str(e)}")
+        return f"Error getting clip envelope: {str(e)}"
 
 # Main execution
 def main():

@@ -232,12 +232,32 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 device_index = params.get("device_index", 0)
                 response["result"] = self._get_device_parameters(track_index, device_index)
+            elif command_type == "list_arrangement_clips":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._list_arrangement_clips(track_index)
+            elif command_type == "get_clip_envelope":
+                response["result"] = self._get_clip_envelope(
+                    params.get("track_index", 0),
+                    params.get("clip_index", 0),
+                    params.get("parameter_path", ""),
+                )
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
-                                 "set_device_parameter"]:
+                                 "set_device_parameter",
+                                 "add_session_clip_to_arrangement",
+                                 "create_arrangement_midi_clip",
+                                 "set_arrangement_clip_position",
+                                 "set_arrangement_clip_loop",
+                                 "set_arrangement_clip_markers",
+                                 "delete_arrangement_clip",
+                                 "set_arrangement_loop",
+                                 "clear_clip_notes",
+                                 "replace_clip_notes",
+                                 "add_clip_envelope_point",
+                                 "clear_clip_envelope"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -296,7 +316,77 @@ class AbletonMCP(ControlSurface):
                             parameter_index = params.get("parameter_index", 0)
                             value = params.get("value")
                             result = self._set_device_parameter(track_index, device_index, parameter_index, value)
-                        
+                        elif command_type == "add_session_clip_to_arrangement":
+                            result = self._add_session_clip_to_arrangement(
+                                params.get("track_index", 0),
+                                params.get("session_clip_index", 0),
+                                params.get("position", 0.0),
+                            )
+                        elif command_type == "create_arrangement_midi_clip":
+                            result = self._create_arrangement_midi_clip(
+                                params.get("track_index", 0),
+                                params.get("start_time", 0.0),
+                                params.get("end_time", 4.0),
+                            )
+                        elif command_type == "set_arrangement_clip_position":
+                            result = self._set_arrangement_clip_position(
+                                params.get("track_index", 0),
+                                params.get("arr_clip_index", 0),
+                                params.get("position", 0.0),
+                            )
+                        elif command_type == "set_arrangement_clip_loop":
+                            result = self._set_arrangement_clip_loop(
+                                params.get("track_index", 0),
+                                params.get("arr_clip_index", 0),
+                                params.get("loop_start", 0.0),
+                                params.get("loop_end", 4.0),
+                                params.get("looping", True),
+                            )
+                        elif command_type == "set_arrangement_clip_markers":
+                            result = self._set_arrangement_clip_markers(
+                                params.get("track_index", 0),
+                                params.get("arr_clip_index", 0),
+                                params.get("start_marker", 0.0),
+                                params.get("end_marker", 4.0),
+                            )
+                        elif command_type == "delete_arrangement_clip":
+                            result = self._delete_arrangement_clip(
+                                params.get("track_index", 0),
+                                params.get("arr_clip_index", 0),
+                            )
+                        elif command_type == "set_arrangement_loop":
+                            result = self._set_arrangement_loop(
+                                params.get("start_beats", 0.0),
+                                params.get("length_beats", 16.0),
+                            )
+                        elif command_type == "clear_clip_notes":
+                            result = self._clear_clip_notes(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("is_arrangement", False),
+                            )
+                        elif command_type == "replace_clip_notes":
+                            result = self._replace_clip_notes(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("notes", []),
+                                params.get("is_arrangement", False),
+                            )
+                        elif command_type == "add_clip_envelope_point":
+                            result = self._add_clip_envelope_point(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("parameter_path", ""),
+                                params.get("time", 0.0),
+                                params.get("value", 0.0),
+                            )
+                        elif command_type == "clear_clip_envelope":
+                            result = self._clear_clip_envelope(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("parameter_path", ""),
+                            )
+
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
                     except Exception as e:
@@ -510,6 +600,236 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error setting device parameter: " + str(e))
             raise
+
+    # Arrangement-view helpers ------------------------------------------------
+
+    def _resolve_mixer_parameter(self, track, parameter_path):
+        """Resolve a parameter_path to a Live DeviceParameter on the track's mixer.
+
+        v1 supports mixer params only:
+          'volume'           -> track.mixer_device.volume
+          'panning'          -> track.mixer_device.panning
+          'send:N'           -> track.mixer_device.sends[N]
+        """
+        if not parameter_path:
+            raise ValueError("parameter_path is required")
+        path = parameter_path.strip().lower()
+        mixer = track.mixer_device
+        if path == "volume":
+            return mixer.volume
+        if path in ("panning", "pan"):
+            return mixer.panning
+        if path.startswith("send:"):
+            try:
+                idx = int(path.split(":", 1)[1])
+            except ValueError:
+                raise ValueError("send path must be 'send:<int>'")
+            sends = mixer.sends
+            if idx < 0 or idx >= len(sends):
+                raise IndexError("send index out of range")
+            return sends[idx]
+        raise ValueError("Unsupported parameter_path '{0}' (v1 supports volume, panning, send:N)".format(parameter_path))
+
+    def _get_arrangement_clip(self, track, arr_clip_index):
+        clips = list(track.arrangement_clips)
+        if arr_clip_index < 0 or arr_clip_index >= len(clips):
+            raise IndexError("Arrangement clip index out of range (track has {0})".format(len(clips)))
+        return clips[arr_clip_index]
+
+    def _get_clip_for_envelope(self, track_index, clip_index, is_arrangement):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        if is_arrangement:
+            return track, self._get_arrangement_clip(track, clip_index)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("Clip slot index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise Exception("No clip in slot")
+        return track, slot.clip
+
+    def _list_arrangement_clips(self, track_index):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        clips = []
+        for i, c in enumerate(track.arrangement_clips):
+            clips.append({
+                "index": i,
+                "name": c.name,
+                "position": c.start_time,
+                "end": c.end_time,
+                "length": c.length,
+                "looping": c.looping,
+                "loop_start": c.loop_start,
+                "loop_end": c.loop_end,
+                "is_audio_clip": c.is_audio_clip,
+                "is_midi_clip": c.is_midi_clip,
+            })
+        return {"track_index": track_index, "track_name": track.name, "clips": clips}
+
+    def _add_session_clip_to_arrangement(self, track_index, session_clip_index, position):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        if session_clip_index < 0 or session_clip_index >= len(track.clip_slots):
+            raise IndexError("Session clip slot index out of range")
+        slot = track.clip_slots[session_clip_index]
+        if not slot.has_clip:
+            raise Exception("No clip in session slot {0}".format(session_clip_index))
+        try:
+            track.duplicate_clip_to_arrangement(slot.clip, position)
+        except AttributeError:
+            raise Exception("track.duplicate_clip_to_arrangement is not available in this Live version")
+        return {"track_index": track_index, "position": position, "arrangement_clip_count": len(track.arrangement_clips)}
+
+    def _create_arrangement_midi_clip(self, track_index, start_time, end_time):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        if end_time <= start_time:
+            raise ValueError("end_time must be greater than start_time")
+        track = self._song.tracks[track_index]
+        if not track.has_midi_input:
+            raise Exception("Track {0} is not a MIDI track".format(track_index))
+        try:
+            clip = track.create_midi_clip(start_time, end_time)
+        except AttributeError:
+            raise Exception("track.create_midi_clip is not available in this Live version")
+        return {
+            "track_index": track_index,
+            "start_time": start_time,
+            "end_time": end_time,
+            "name": clip.name if clip else None,
+        }
+
+    def _set_arrangement_clip_position(self, track_index, arr_clip_index, position):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        clip = self._get_arrangement_clip(track, arr_clip_index)
+        try:
+            clip.position = position
+        except AttributeError:
+            raise Exception("Clip.position is read-only in this Live version")
+        return {"position": clip.start_time, "length": clip.length}
+
+    def _set_arrangement_clip_loop(self, track_index, arr_clip_index, loop_start, loop_end, looping):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        clip = self._get_arrangement_clip(track, arr_clip_index)
+        if loop_end <= loop_start:
+            raise ValueError("loop_end must be greater than loop_start")
+        clip.loop_start = loop_start
+        clip.loop_end = loop_end
+        clip.looping = bool(looping)
+        return {"loop_start": clip.loop_start, "loop_end": clip.loop_end, "looping": clip.looping}
+
+    def _set_arrangement_clip_markers(self, track_index, arr_clip_index, start_marker, end_marker):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        clip = self._get_arrangement_clip(track, arr_clip_index)
+        if end_marker <= start_marker:
+            raise ValueError("end_marker must be greater than start_marker")
+        clip.start_marker = start_marker
+        clip.end_marker = end_marker
+        return {"start_marker": clip.start_marker, "end_marker": clip.end_marker}
+
+    def _delete_arrangement_clip(self, track_index, arr_clip_index):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        clip = self._get_arrangement_clip(track, arr_clip_index)
+        try:
+            track.delete_clip(clip)
+        except AttributeError:
+            raise Exception("track.delete_clip is not available in this Live version")
+        return {"deleted_index": arr_clip_index, "remaining": len(track.arrangement_clips)}
+
+    def _set_arrangement_loop(self, start_beats, length_beats):
+        if length_beats <= 0:
+            raise ValueError("length_beats must be > 0")
+        self._song.loop_start = start_beats
+        self._song.loop_length = length_beats
+        return {"loop_start": self._song.loop_start, "loop_length": self._song.loop_length}
+
+    def _clear_clip_notes(self, track_index, clip_index, is_arrangement):
+        _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        if not clip.is_midi_clip:
+            raise Exception("Clip is not a MIDI clip")
+        # Live's set_notes with empty tuple replaces all notes with nothing.
+        clip.set_notes(tuple())
+        return {"cleared": True}
+
+    def _replace_clip_notes(self, track_index, clip_index, notes, is_arrangement):
+        _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        if not clip.is_midi_clip:
+            raise Exception("Clip is not a MIDI clip")
+        live_notes = []
+        for note in notes:
+            live_notes.append((
+                note.get("pitch", 60),
+                note.get("start_time", 0.0),
+                note.get("duration", 0.25),
+                note.get("velocity", 100),
+                note.get("mute", False),
+            ))
+        # Pattern: clear first, then set, so this truly replaces.
+        clip.set_notes(tuple())
+        clip.set_notes(tuple(live_notes))
+        return {"note_count": len(live_notes)}
+
+    def _add_clip_envelope_point(self, track_index, clip_index, parameter_path, time, value):
+        # v1: session clips only. Live's clip.automation_envelope rejects arrangement
+        # clips for mixer params with "Not a session clip ...". Arrangement-view mixer
+        # automation lives on the track timeline lane and is deferred to v2.
+        track, clip = self._get_clip_for_envelope(track_index, clip_index, False)
+        param = self._resolve_mixer_parameter(track, parameter_path)
+        if not (param.min <= value <= param.max):
+            raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, param.min, param.max, param.name))
+        try:
+            env = clip.automation_envelope(param)
+            if env is None:
+                env = clip.create_automation_envelope(param)
+        except AttributeError:
+            raise Exception("Clip envelope API not available in this Live version")
+        # Live exposes insert_step(time, length, value); length 0 inserts a point.
+        env.insert_step(time, 0.0, value)
+        return {"parameter": param.name, "time": time, "value": value}
+
+    def _clear_clip_envelope(self, track_index, clip_index, parameter_path):
+        track, clip = self._get_clip_for_envelope(track_index, clip_index, False)
+        param = self._resolve_mixer_parameter(track, parameter_path)
+        try:
+            clip.clear_envelope(param)
+        except AttributeError:
+            raise Exception("Clip.clear_envelope is not available in this Live version")
+        return {"parameter": param.name, "cleared": True}
+
+    def _get_clip_envelope(self, track_index, clip_index, parameter_path):
+        track, clip = self._get_clip_for_envelope(track_index, clip_index, False)
+        param = self._resolve_mixer_parameter(track, parameter_path)
+        env = None
+        try:
+            env = clip.automation_envelope(param)
+        except AttributeError:
+            raise Exception("Clip envelope API not available in this Live version")
+        if env is None:
+            return {"parameter": param.name, "exists": False, "points": []}
+        # AutomationEnvelope doesn't expose a clean "list points" — we sample at integer beats.
+        # Caller should treat this as a coarse view; precise inspection requires Live's UI.
+        length = clip.length
+        samples = []
+        try:
+            steps = max(1, int(length))
+            for i in range(steps + 1):
+                t = min(float(i), length)
+                samples.append({"time": t, "value": env.value_at_time(t)})
+        except AttributeError:
+            pass
+        return {"parameter": param.name, "exists": True, "samples": samples}
 
     def _create_midi_track(self, index):
         """Create a new MIDI track at the specified index"""
