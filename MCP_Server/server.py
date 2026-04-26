@@ -783,21 +783,28 @@ def replace_clip_notes(
 def add_clip_envelope_point(
     ctx: Context, track_index: int, clip_index: int,
     parameter_path: str, time: float, value: float,
+    is_arrangement: bool = False,
 ) -> str:
     """
-    Add a point to a SESSION clip's automation envelope for a mixer parameter.
+    Add a point to a clip's automation envelope.
 
-    parameter_path (v1):
+    parameter_path:
     - "volume"
     - "panning" (or "pan")
-    - "send:N"  (e.g. "send:0" for return A)
+    - "send:N"            (e.g. "send:0" for return A)
+    - "device:I:param:J"  (track.devices[I].parameters[J])
 
     Time is clip-local beats. Value is range-checked against the parameter's [min, max].
     The envelope is created on first call; subsequent calls add more points.
 
-    v1 scope: session clips only. Arrangement-view mixer automation lives on the
-    track timeline lane (a different Live API surface) and is deferred to v2,
-    along with device-parameter automation (e.g. 'device:0:param:5').
+    Set is_arrangement=True to target an arrangement clip (clip_index is then the
+    arrangement_clips index, not a clip slot). Caveat: Live's Clip.automation_envelope
+    rejects arrangement clips for ANY parameter type (mixer or device) with
+    "Not a session clip or parameter belongs to another track." — confirmed empirically.
+    Arrangement-view automation (per-clip envelopes AND track-lane mixer fades) lives
+    on a different LOM surface; this tool's is_arrangement path is wired but not yet
+    useful. Use session clips, then add_session_clip_to_arrangement to carry the
+    automation onto the timeline.
     """
     return _forward("add_clip_envelope_point", {
         "track_index": track_index,
@@ -805,35 +812,37 @@ def add_clip_envelope_point(
         "parameter_path": parameter_path,
         "time": time,
         "value": value,
+        "is_arrangement": is_arrangement,
     })
 
 @mcp.tool()
 def clear_clip_envelope(
     ctx: Context, track_index: int, clip_index: int,
-    parameter_path: str,
+    parameter_path: str, is_arrangement: bool = False,
 ) -> str:
-    """Remove all envelope points for one parameter on a session clip. (v1: session only)"""
+    """Remove all envelope points for one parameter on a clip."""
     return _forward("clear_clip_envelope", {
         "track_index": track_index,
         "clip_index": clip_index,
         "parameter_path": parameter_path,
+        "is_arrangement": is_arrangement,
     })
 
 @mcp.tool()
 def get_clip_envelope(
     ctx: Context, track_index: int, clip_index: int,
-    parameter_path: str,
+    parameter_path: str, is_arrangement: bool = False,
 ) -> str:
     """
-    Inspect a session clip's automation envelope for a parameter. Returns sampled
+    Inspect a clip's automation envelope for a parameter. Returns sampled
     values at integer-beat intervals across the clip — coarse, intended for sanity
     checks rather than precise round-trips. Live's UI is the source of truth.
-    (v1: session only.)
     """
     return _forward("get_clip_envelope", {
         "track_index": track_index,
         "clip_index": clip_index,
         "parameter_path": parameter_path,
+        "is_arrangement": is_arrangement,
     })
 
 # Main execution

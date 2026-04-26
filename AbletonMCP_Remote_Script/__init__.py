@@ -240,6 +240,7 @@ class AbletonMCP(ControlSurface):
                     params.get("track_index", 0),
                     params.get("clip_index", 0),
                     params.get("parameter_path", ""),
+                    params.get("is_arrangement", False),
                 )
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name",
@@ -379,12 +380,14 @@ class AbletonMCP(ControlSurface):
                                 params.get("parameter_path", ""),
                                 params.get("time", 0.0),
                                 params.get("value", 0.0),
+                                params.get("is_arrangement", False),
                             )
                         elif command_type == "clear_clip_envelope":
                             result = self._clear_clip_envelope(
                                 params.get("track_index", 0),
                                 params.get("clip_index", 0),
                                 params.get("parameter_path", ""),
+                                params.get("is_arrangement", False),
                             )
 
                         # Put the result in the queue
@@ -603,13 +606,13 @@ class AbletonMCP(ControlSurface):
 
     # Arrangement-view helpers ------------------------------------------------
 
-    def _resolve_mixer_parameter(self, track, parameter_path):
-        """Resolve a parameter_path to a Live DeviceParameter on the track's mixer.
+    def _resolve_parameter(self, track, parameter_path):
+        """Resolve a parameter_path to a Live DeviceParameter on a track.
 
-        v1 supports mixer params only:
-          'volume'           -> track.mixer_device.volume
-          'panning'          -> track.mixer_device.panning
-          'send:N'           -> track.mixer_device.sends[N]
+          'volume'            -> track.mixer_device.volume
+          'panning' / 'pan'   -> track.mixer_device.panning
+          'send:N'            -> track.mixer_device.sends[N]
+          'device:I:param:J'  -> track.devices[I].parameters[J]
         """
         if not parameter_path:
             raise ValueError("parameter_path is required")
@@ -628,7 +631,22 @@ class AbletonMCP(ControlSurface):
             if idx < 0 or idx >= len(sends):
                 raise IndexError("send index out of range")
             return sends[idx]
-        raise ValueError("Unsupported parameter_path '{0}' (v1 supports volume, panning, send:N)".format(parameter_path))
+        if path.startswith("device:"):
+            parts = path.split(":")
+            if len(parts) != 4 or parts[2] != "param":
+                raise ValueError("device path must be 'device:<int>:param:<int>'")
+            try:
+                di, pi = int(parts[1]), int(parts[3])
+            except ValueError:
+                raise ValueError("device path indices must be integers")
+            devices = track.devices
+            if di < 0 or di >= len(devices):
+                raise IndexError("device index out of range (track has {0})".format(len(devices)))
+            params_list = devices[di].parameters
+            if pi < 0 or pi >= len(params_list):
+                raise IndexError("parameter index out of range (device has {0})".format(len(params_list)))
+            return params_list[pi]
+        raise ValueError("Unsupported parameter_path '{0}' (supports volume, panning, send:N, device:I:param:J)".format(parameter_path))
 
     def _get_arrangement_clip(self, track, arr_clip_index):
         clips = list(track.arrangement_clips)
@@ -781,12 +799,13 @@ class AbletonMCP(ControlSurface):
         clip.set_notes(tuple(live_notes))
         return {"note_count": len(live_notes)}
 
-    def _add_clip_envelope_point(self, track_index, clip_index, parameter_path, time, value):
-        # v1: session clips only. Live's clip.automation_envelope rejects arrangement
-        # clips for mixer params with "Not a session clip ...". Arrangement-view mixer
-        # automation lives on the track timeline lane and is deferred to v2.
-        track, clip = self._get_clip_for_envelope(track_index, clip_index, False)
-        param = self._resolve_mixer_parameter(track, parameter_path)
+    def _add_clip_envelope_point(self, track_index, clip_index, parameter_path, time, value, is_arrangement):
+        # Live's clip.automation_envelope rejects arrangement clips for ANY param type
+        # (confirmed 2026-04-25 with both mixer and device params). The is_arrangement
+        # branch is wired but currently always errors — arrangement automation needs a
+        # different LOM API which we haven't located yet.
+        track, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        param = self._resolve_parameter(track, parameter_path)
         if not (param.min <= value <= param.max):
             raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, param.min, param.max, param.name))
         try:
@@ -795,22 +814,21 @@ class AbletonMCP(ControlSurface):
                 env = clip.create_automation_envelope(param)
         except AttributeError:
             raise Exception("Clip envelope API not available in this Live version")
-        # Live exposes insert_step(time, length, value); length 0 inserts a point.
         env.insert_step(time, 0.0, value)
         return {"parameter": param.name, "time": time, "value": value}
 
-    def _clear_clip_envelope(self, track_index, clip_index, parameter_path):
-        track, clip = self._get_clip_for_envelope(track_index, clip_index, False)
-        param = self._resolve_mixer_parameter(track, parameter_path)
+    def _clear_clip_envelope(self, track_index, clip_index, parameter_path, is_arrangement):
+        track, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        param = self._resolve_parameter(track, parameter_path)
         try:
             clip.clear_envelope(param)
         except AttributeError:
             raise Exception("Clip.clear_envelope is not available in this Live version")
         return {"parameter": param.name, "cleared": True}
 
-    def _get_clip_envelope(self, track_index, clip_index, parameter_path):
-        track, clip = self._get_clip_for_envelope(track_index, clip_index, False)
-        param = self._resolve_mixer_parameter(track, parameter_path)
+    def _get_clip_envelope(self, track_index, clip_index, parameter_path, is_arrangement):
+        track, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        param = self._resolve_parameter(track, parameter_path)
         env = None
         try:
             env = clip.automation_envelope(param)
