@@ -202,6 +202,7 @@ class AbletonMCP(ControlSurface):
             "list_devices":              (False, lambda p: s._list_devices(p.get("track_index", 0))),
             "get_device_parameters":     (False, lambda p: s._get_device_parameters(p.get("track_index", 0), p.get("device_index", 0))),
             "get_track_sends":           (False, lambda p: s._get_track_sends(p.get("track_index", 0))),
+            "get_cue_points":            (False, lambda p: s._get_cue_points()),
             "list_arrangement_clips":    (False, lambda p: s._list_arrangement_clips(p.get("track_index", 0))),
             "get_clip_envelope":         (False, lambda p: s._get_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("is_arrangement", False))),
             "get_clip_notes":            (False, lambda p: s._get_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("is_arrangement", False))),
@@ -227,6 +228,10 @@ class AbletonMCP(ControlSurface):
             "start_playback":                  (True, lambda p: s._start_playback(p.get("from_beats"))),
             "stop_playback":                   (True, lambda p: s._stop_playback()),
             "set_transport_position":          (True, lambda p: s._set_transport_position(p.get("beats", 0.0))),
+            "set_or_delete_cue":               (True, lambda p: s._set_or_delete_cue()),
+            "jump_to_cue":                     (True, lambda p: s._jump_to_cue(p.get("cue_index", 0))),
+            "jump_to_next_cue":                (True, lambda p: s._jump_to_next_cue()),
+            "jump_to_prev_cue":                (True, lambda p: s._jump_to_prev_cue()),
             "save_session":                    (True, lambda p: s._save_session()),
             "save_session_as":                 (True, lambda p: s._save_session_as(p.get("path", ""))),
             "delete_session_clip":             (True, lambda p: s._delete_session_clip(p.get("track_index", 0), p.get("clip_slot_index", 0))),
@@ -849,6 +854,62 @@ class AbletonMCP(ControlSurface):
             return {"track_index": track_index, "send_index": send_index, "value": new_value}
         except Exception as e:
             self.log_message("Error setting track send: " + str(e))
+            raise
+
+    def _get_cue_points(self):
+        """List arrangement cue points (locators). Each cue's `time` is in beats; pair with set_transport_position or jump_to_cue to seek."""
+        try:
+            cues = [
+                {"index": i, "name": cue.name, "time": cue.time}
+                for i, cue in enumerate(self._song.cue_points)
+            ]
+            return {"cue_points": cues}
+        except Exception as e:
+            self.log_message("Error getting cue points: " + str(e))
+            raise
+
+    def _set_or_delete_cue(self):
+        """Toggle a cue point at the current arrangement position (Live's native set/delete-cue behavior)."""
+        try:
+            self._song.set_or_delete_cue()
+            return {"cue_count": len(self._song.cue_points), "at_beat": self._song.current_song_time}
+        except Exception as e:
+            self.log_message("Error toggling cue: " + str(e))
+            raise
+
+    def _jump_to_cue(self, cue_index):
+        """Jump the arrangement cursor to the named cue at the given index."""
+        try:
+            cues = self._song.cue_points
+            if cue_index < 0 or cue_index >= len(cues):
+                raise IndexError("Cue index out of range")
+            cue = cues[cue_index]
+            cue.jump()
+            return {"cue_index": cue_index, "name": cue.name, "time": cue.time}
+        except Exception as e:
+            self.log_message("Error jumping to cue: " + str(e))
+            raise
+
+    def _jump_to_next_cue(self):
+        """Jump to the next cue from the current position (no-op if none)."""
+        try:
+            if not self._song.can_jump_to_next_cue:
+                return {"jumped": False, "current_beat": self._song.current_song_time}
+            self._song.jump_to_next_cue()
+            return {"jumped": True, "current_beat": self._song.current_song_time}
+        except Exception as e:
+            self.log_message("Error jumping to next cue: " + str(e))
+            raise
+
+    def _jump_to_prev_cue(self):
+        """Jump to the previous cue from the current position (no-op if none)."""
+        try:
+            if not self._song.can_jump_to_prev_cue:
+                return {"jumped": False, "current_beat": self._song.current_song_time}
+            self._song.jump_to_prev_cue()
+            return {"jumped": True, "current_beat": self._song.current_song_time}
+        except Exception as e:
+            self.log_message("Error jumping to prev cue: " + str(e))
             raise
 
     def _set_track_mute(self, track_index, mute):

@@ -33,6 +33,7 @@ _MODIFYING_COMMANDS = frozenset({
     "add_clip_envelope_point", "clear_clip_envelope",
     "set_transport_position", "save_session", "save_session_as",
     "delete_session_clip",
+    "set_or_delete_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
 })
 
 @dataclass
@@ -604,6 +605,60 @@ def set_transport_position(ctx: Context, beats: float) -> str:
     start_playback(from_beats=...) directly to do both in one call.
     """
     return _forward("set_transport_position", {"beats": beats})
+
+@mcp.tool()
+def get_cue_points(ctx: Context) -> str:
+    """
+    List arrangement cue points (locators) with their names and beat positions.
+
+    Cue names are the bridge from natural-language regions ("in the bridge",
+    "at the drop") to a beat position. Pair with set_transport_position(beats=cue.time)
+    or jump_to_cue(cue_index) to seek. Cue indices are positional and shift if
+    cues are added/removed — re-fetch before navigating.
+    """
+    return _forward("get_cue_points")
+
+@mcp.tool()
+def set_or_delete_cue(ctx: Context) -> str:
+    """
+    Toggle a cue point at the current arrangement cursor.
+
+    Mirrors Live's native "Set/Delete Cue" command: creates a cue at the
+    current position, or deletes the one already there. Use
+    set_transport_position(beats=...) first to place the cursor.
+    """
+    return _forward("set_or_delete_cue")
+
+@mcp.tool()
+def jump_to_cue(ctx: Context, cue_index: int) -> str:
+    """
+    Jump the arrangement cursor to the cue point at the given index.
+
+    Parameters:
+    - cue_index: Index into the list returned by get_cue_points
+
+    Preserves play state (jumps the cursor whether playing or stopped).
+    Cue indices shift when cues are added/removed — re-list before jumping.
+    """
+    return _forward("jump_to_cue", {"cue_index": cue_index})
+
+@mcp.tool()
+def jump_to_next_cue(ctx: Context) -> str:
+    """
+    Jump to the next cue point relative to the current arrangement cursor.
+
+    No-op if there is no next cue (returns jumped=False).
+    """
+    return _forward("jump_to_next_cue")
+
+@mcp.tool()
+def jump_to_prev_cue(ctx: Context) -> str:
+    """
+    Jump to the previous cue point relative to the current arrangement cursor.
+
+    No-op if there is no previous cue (returns jumped=False).
+    """
+    return _forward("jump_to_prev_cue")
 
 @mcp.tool()
 def save_session(ctx: Context) -> str:

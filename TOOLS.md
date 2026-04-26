@@ -18,6 +18,11 @@ or deleted — re-list before mutating.
 | `stop_playback` | `()` | Stop. |
 | `set_transport_position` | `(beats: float)` | Move arrangement cursor without starting playback. |
 | `set_arrangement_loop` | `(start_beats, length_beats)` | Set the loop brace region (doesn't enable looping). |
+| `get_cue_points` | `()` | List arrangement locators: index, name, beat time. Bridge from "in the bridge" → beat position. |
+| `set_or_delete_cue` | `()` | Toggle a cue at the current cursor (Live's native set/delete-cue). |
+| `jump_to_cue` | `(cue_index)` | Jump cursor to a specific cue. Indices shift on add/remove. |
+| `jump_to_next_cue` | `()` | Jump to the next cue from the cursor; no-op at end. |
+| `jump_to_prev_cue` | `()` | Jump to the previous cue from the cursor; no-op at start. |
 | `save_session` | `()` | Save the set to its existing path; fails for untitled sets. |
 | `save_session_as` | `(path: str)` | Save the set to a new absolute `.als` path. |
 
