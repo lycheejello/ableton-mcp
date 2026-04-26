@@ -67,7 +67,7 @@ disjoint sets only.
       error than "not found."
       Scope: remote-script (browser/loader investigation; server unchanged)
 
-- [ ] **`get_transport_state` (read playback / position).** No way to
+- [claimed: claude-transport 2026-04-26] **`get_transport_state` (read playback / position).** No way to
       check if Live is playing, current beat, looping state, etc. During
       lofi-01 we wasted time chasing silent playback that turned out to
       be the transport stopped — no API feedback. Acceptance: returns
