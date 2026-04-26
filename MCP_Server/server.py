@@ -5,7 +5,8 @@ import json
 import logging
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union
+from collections.abc import AsyncIterator
+from typing import Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -110,7 +111,7 @@ class AbletonConnection:
         else:
             raise Exception("No data received")
 
-    def send_command(self, command_type: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    def send_command(self, command_type: str, params: dict[str, Any] = None) -> dict[str, Any]:
         """Send a command to Ableton and return the response"""
         if not self.sock and not self.connect():
             raise ConnectionError("Not connected to Ableton")
@@ -176,7 +177,7 @@ class AbletonConnection:
             raise Exception(f"Communication error with Ableton: {str(e)}")
 
 @asynccontextmanager
-async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
+async def server_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """Manage server startup and shutdown lifecycle"""
     try:
         logger.info("AbletonMCP server starting up")
@@ -269,7 +270,7 @@ def get_ableton_connection():
     return _ableton_connection
 
 
-def _call(command: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+def _call(command: str, params: dict[str, Any] = None) -> dict[str, Any]:
     """Send a command to Ableton and return the parsed result. Raises on error.
 
     Used by tools that need to inspect or post-process the result.
@@ -277,7 +278,7 @@ def _call(command: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
     return get_ableton_connection().send_command(command, params)
 
 
-def _forward(command: str, params: Dict[str, Any] = None, label: str = None) -> str:
+def _forward(command: str, params: dict[str, Any] = None, label: str = None) -> str:
     """Forward a command to Ableton and return its result as JSON, or an error string.
 
     Used by the majority of tools that just relay parameters and dump the response.
@@ -352,7 +353,7 @@ def add_notes_to_clip(
     ctx: Context,
     track_index: int,
     clip_index: int,
-    notes: List[Dict[str, Union[int, float, bool]]]
+    notes: list[dict[str, int | float | bool]]
 ) -> str:
     """
     Add MIDI notes to a clip.
@@ -825,7 +826,7 @@ def clear_clip_notes(
 @mcp.tool()
 def replace_clip_notes(
     ctx: Context, track_index: int, clip_index: int,
-    notes: List[Dict[str, Union[int, float, bool]]],
+    notes: list[dict[str, int | float | bool]],
     is_arrangement: bool = False,
 ) -> str:
     """
