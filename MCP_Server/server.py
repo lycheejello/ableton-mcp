@@ -12,6 +12,23 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AbletonMCPServer")
 
+# Commands that mutate Live's state. The Remote Script schedules these on Live's
+# main thread; we add small pre/post delays and a longer timeout for them.
+# Keep in sync with the on_main_thread=True entries in the Remote Script's
+# COMMANDS registry (AbletonMCP_Remote_Script/__init__.py).
+_MODIFYING_COMMANDS = frozenset({
+    "create_midi_track", "create_audio_track", "set_track_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
+    "start_playback", "stop_playback", "load_instrument_or_effect",
+    "load_browser_item",
+    "add_session_clip_to_arrangement", "create_arrangement_midi_clip",
+    "set_arrangement_clip_position", "set_arrangement_clip_loop",
+    "set_arrangement_clip_markers", "delete_arrangement_clip",
+    "set_arrangement_loop", "clear_clip_notes", "replace_clip_notes",
+    "add_clip_envelope_point", "clear_clip_envelope",
+})
+
 @dataclass
 class AbletonConnection:
     host: str
@@ -101,18 +118,7 @@ class AbletonConnection:
             "params": params or {}
         }
 
-        # Check if this is a state-modifying command
-        is_modifying_command = command_type in [
-            "create_midi_track", "create_audio_track", "set_track_name",
-            "create_clip", "add_notes_to_clip", "set_clip_name",
-            "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect",
-            "add_session_clip_to_arrangement", "create_arrangement_midi_clip",
-            "set_arrangement_clip_position", "set_arrangement_clip_loop",
-            "set_arrangement_clip_markers", "delete_arrangement_clip",
-            "set_arrangement_loop", "clear_clip_notes", "replace_clip_notes",
-            "add_clip_envelope_point", "clear_clip_envelope",
-        ]
+        is_modifying_command = command_type in _MODIFYING_COMMANDS
 
         try:
             logger.info(f"Sending command: {command_type} with params: {params}")
