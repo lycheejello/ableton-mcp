@@ -25,6 +25,33 @@ disjoint sets only.
 
 ## Open
 
+- [ ] **Cue point rename — `set_cue_name(cue_index, name)`.** SZO-23
+      shipped read + toggle + nav for cues but not naming. `CuePoint.name`
+      is a writable LOM property; this is a one-line tool plus dispatch.
+      Load-bearing for the v0 mix-notes interpreter: cue *names* are how
+      "in the bridge" / "at the drop" bind to a beat, and currently the
+      agent can navigate cues but cannot label them — every cue placed
+      via `set_or_delete_cue` lands with Live's auto-name ("1", "2", …)
+      and a human has to rename in the UI before the agent can use it.
+      Discovered 2026-04-26 during /interpret-notes smoke test.
+      LOM: `Live.CuePoint.CuePoint.name`.
+      Scope: server + remote-script
+
+- [ ] **Position-aware cue placement — `place_cue(beat, name=None)`.**
+      Today, placing N cues at known positions takes 2N round-trips
+      (`set_transport_position` then `set_or_delete_cue`) plus an
+      observed cursor-lag race: `set_or_delete_cue` toggles ~0.5–2.7 beats
+      off the previously-requested position because the next call fires
+      before the cursor settles. A direct positional setter sidesteps
+      both. If `CuePoint`-level positional add isn't exposed in the LOM,
+      either (a) hide the cursor dance behind the tool with a settled-
+      cursor wait, or (b) document the LOM gap and keep the dance with a
+      sync barrier. Pairs naturally with the rename item — same call can
+      take a name. Discovered 2026-04-26 during /interpret-notes smoke test.
+      LOM: investigate `Song.cue_points` mutability + `Song.set_or_delete_cue`
+      semantics under rapid `current_song_time` writes.
+      Scope: server + remote-script
+
 - [ ] **Remove dead `is_arrangement=True` plumbing from envelope tools.**
       The arg is wired through server + remote-script but always errors at
       the LOM layer — arrangement-view automation cannot be written via the
