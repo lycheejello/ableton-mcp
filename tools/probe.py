@@ -28,18 +28,16 @@ def probe(command: str, params: dict | None = None) -> dict:
     sock.settimeout(TIMEOUT)
     sock.connect((HOST, PORT))
     try:
-        sock.sendall(json.dumps({"type": command, "params": params or {}}).encode("utf-8"))
+        payload = (json.dumps({"type": command, "params": params or {}}) + "\n").encode("utf-8")
+        sock.sendall(payload)
         buf = b""
-        while True:
+        while b"\n" not in buf:
             chunk = sock.recv(8192)
             if not chunk:
-                break
+                raise RuntimeError("Connection closed before full response")
             buf += chunk
-            try:
-                return json.loads(buf.decode("utf-8"))
-            except json.JSONDecodeError:
-                continue
-        return json.loads(buf.decode("utf-8"))
+        line, _, _ = buf.partition(b"\n")
+        return json.loads(line.decode("utf-8"))
     finally:
         sock.close()
 

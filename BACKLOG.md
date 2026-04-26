@@ -247,25 +247,6 @@ XML directly.
       error than "not found."
       Scope: remote-script (browser/loader investigation; server unchanged)
 
-- [claimed: claude-ndjson 2026-04-26] **NDJSON framing + drop the modifying-command sleeps.** Current
-      transport (JSON over TCP localhost:9877) frames messages by
-      heuristic: read chunks, try `json.loads` after each, treat
-      `JSONDecodeError` as "incomplete, keep reading"
-      (`MCP_Server/server.py` `receive_full_response`). Works because
-      messages are small and only one is in flight, but it's load-bearing
-      — any pipelining or partially-buffered prior response corrupts the
-      stream. Replace with newline-delimited JSON: both sides write
-      `json.dumps(x) + "\n"`, both sides `readline()`. Then delete the
-      100ms pre/post sleeps in `send_command` (lines ~124 and ~145) —
-      they're papering over the framing flakiness, not solving a real
-      timing problem (the Remote Script's response queue already
-      guarantees the response only fires after the main-thread task
-      completes). Wins: 200ms off every modifying call, robust framing,
-      ~20 LOC simpler.
-      Scope: transport (server send/receive + remote-script socket handler).
-      EXCLUSIVE: blocks all other server.py + remote-script work while
-      in-flight — coordinate, do not parallelize.
-
 - [ ] **Switch TCP → Unix domain socket** (after NDJSON lands). Trivial
       swap: `AF_INET`/`(host, port)` → `AF_UNIX`/`/tmp/abletonmcp.sock`.
       Wins: no other process on the machine can connect (security), no
@@ -311,6 +292,13 @@ XML directly.
   tap/nudge/back-to-arranger, envelope round-trip, and Live-12 envelope-
   API upgrade. Confirmed the arrangement-automation gap persists in
   Live 12 — Won't-do entry updated.
+
+- 2026-04-26 — NDJSON framing on the Live<->MCP socket. Both sides now
+  write `json.dumps(x) + "\n"` and read line-by-line; replaced the
+  "json.loads after each chunk" framing heuristic with a per-connection
+  byte buffer + `_read_line`. Dropped the 100ms pre/post sleeps in
+  `send_command` (200ms off every modifying call). Updated `tools/probe.py`
+  to match. Pipelined-frame test on a single socket now passes.
 
 - 2026-04-26 — `get_clip_notes` for round-trip note verification; fixed
   `clear_clip_notes` / `replace_clip_notes` no-op bug by porting all

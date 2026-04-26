@@ -39,6 +39,7 @@ class AbletonConnection:
     host: str
     port: int
     sock: socket.socket = None
+    _recv_buffer: bytes = b""
 
     def connect(self) -> bool:
         """Connect to the Ableton Remote Script socket server"""
@@ -48,6 +49,7 @@ class AbletonConnection:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
+            self._recv_buffer = b""
             logger.info(f"Connected to Ableton at {self.host}:{self.port}")
             return True
         except Exception as e:
@@ -64,54 +66,18 @@ class AbletonConnection:
                 logger.error(f"Error disconnecting from Ableton: {str(e)}")
             finally:
                 self.sock = None
+                self._recv_buffer = b""
 
-    def receive_full_response(self, sock, buffer_size=8192):
-        """Receive the complete response, potentially in multiple chunks"""
-        chunks = []
-        sock.settimeout(15.0)  # Increased timeout for operations that might take longer
-
-        try:
-            while True:
-                try:
-                    chunk = sock.recv(buffer_size)
-                    if not chunk:
-                        if not chunks:
-                            raise Exception("Connection closed before receiving any data")
-                        break
-
-                    chunks.append(chunk)
-
-                    # Check if we've received a complete response
-                    try:
-                        data = b''.join(chunks)
-                        json.loads(data.decode('utf-8'))
-                        # If we get here, it parsed successfully
-                        logger.info(f"Received complete response ({len(data)} bytes)")
-                        return data
-                    except json.JSONDecodeError:
-                        # Incomplete JSON, continue receiving
-                        continue
-                except socket.timeout:
-                    logger.warning("Socket timeout during chunked receive")
-                    break
-                except (ConnectionError, BrokenPipeError, ConnectionResetError) as e:
-                    logger.error(f"Socket connection error during receive: {str(e)}")
-                    raise
-        except Exception as e:
-            logger.error(f"Error during receive: {str(e)}")
-            raise
-
-        # If we get here, we either timed out or broke out of the loop
-        if chunks:
-            data = b''.join(chunks)
-            logger.info(f"Returning data after receive completion ({len(data)} bytes)")
-            try:
-                json.loads(data.decode('utf-8'))
-                return data
-            except json.JSONDecodeError:
-                raise Exception("Incomplete JSON response received")
-        else:
-            raise Exception("No data received")
+    def _read_line(self, buffer_size: int = 8192) -> bytes:
+        """Read one newline-terminated frame from the socket. The trailing
+        newline is stripped from the returned bytes."""
+        while b"\n" not in self._recv_buffer:
+            chunk = self.sock.recv(buffer_size)
+            if not chunk:
+                raise Exception("Connection closed before receiving full response")
+            self._recv_buffer += chunk
+        line, _, self._recv_buffer = self._recv_buffer.partition(b"\n")
+        return line
 
     def send_command(self, command_type: str, params: dict[str, Any] = None) -> dict[str, Any]:
         """Send a command to Ableton and return the response"""
@@ -128,35 +94,22 @@ class AbletonConnection:
         try:
             logger.info(f"Sending command: {command_type} with params: {params}")
 
-            # Send the command
-            self.sock.sendall(json.dumps(command).encode('utf-8'))
-            logger.info(f"Command sent, waiting for response...")
+            # NDJSON framing: one JSON object per line, both directions.
+            self.sock.sendall((json.dumps(command) + "\n").encode("utf-8"))
+            logger.info("Command sent, waiting for response...")
 
-            # For state-modifying commands, add a small delay to give Ableton time to process
-            if is_modifying_command:
-                import time
-                time.sleep(0.1)  # 100ms delay
-
-            # Set timeout based on command type
             timeout = 15.0 if is_modifying_command else 10.0
             self.sock.settimeout(timeout)
 
-            # Receive the response
-            response_data = self.receive_full_response(self.sock)
+            response_data = self._read_line()
             logger.info(f"Received {len(response_data)} bytes of data")
 
-            # Parse the response
-            response = json.loads(response_data.decode('utf-8'))
+            response = json.loads(response_data.decode("utf-8"))
             logger.info(f"Response parsed, status: {response.get('status', 'unknown')}")
 
             if response.get("status") == "error":
                 logger.error(f"Ableton error: {response.get('message')}")
                 raise Exception(response.get("message", "Unknown error from Ableton"))
-
-            # For state-modifying commands, add another small delay after receiving response
-            if is_modifying_command:
-                import time
-                time.sleep(0.1)  # 100ms delay
 
             return response.get("result", {})
         except socket.timeout:

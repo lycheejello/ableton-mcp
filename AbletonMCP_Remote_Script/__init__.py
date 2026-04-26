@@ -135,73 +135,48 @@ class AbletonMCP(ControlSurface):
             self.log_message("Server thread error: " + str(e))
     
     def _handle_client(self, client):
-        """Handle communication with a connected client"""
+        """Handle communication with a connected client. NDJSON framing:
+        each request and response is a single JSON object terminated by \n."""
         self.log_message("Client handler started")
-        client.settimeout(None)  # No timeout for client socket
-        buffer = ''  # Changed from b'' to '' for Python 2
-        
+        client.settimeout(None)
+        buffer = ''
+
+        def send(obj):
+            payload = (json.dumps(obj) + "\n").encode('utf-8')
+            client.sendall(payload)
+
         try:
             while self.running:
                 try:
-                    # Receive data
                     data = client.recv(8192)
-                    
                     if not data:
-                        # Client disconnected
                         self.log_message("Client disconnected")
                         break
-                    
-                    # Accumulate data in buffer with explicit encoding/decoding
-                    try:
-                        # Python 3: data is bytes, decode to string
-                        buffer += data.decode('utf-8')
-                    except AttributeError:
-                        # Python 2: data is already string
-                        buffer += data
-                    
-                    try:
-                        # Try to parse command from buffer
-                        command = json.loads(buffer)  # Removed decode('utf-8')
-                        buffer = ''  # Clear buffer after successful parse
-                        
-                        self.log_message("Received command: " + str(command.get("type", "unknown")))
-                        
-                        # Process the command and get response
-                        response = self._process_command(command)
-                        
-                        # Send the response with explicit encoding
+                    buffer += data.decode('utf-8')
+
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        if not line:
+                            continue
                         try:
-                            # Python 3: encode string to bytes
-                            client.sendall(json.dumps(response).encode('utf-8'))
-                        except AttributeError:
-                            # Python 2: string is already bytes
-                            client.sendall(json.dumps(response))
-                    except ValueError:
-                        # Incomplete data, wait for more
-                        continue
-                        
+                            command = json.loads(line)
+                        except ValueError as e:
+                            self.log_message("Malformed JSON line: " + str(e))
+                            send({"status": "error", "message": "Malformed JSON: " + str(e)})
+                            continue
+
+                        self.log_message("Received command: " + str(command.get("type", "unknown")))
+                        response = self._process_command(command)
+                        send(response)
+
                 except Exception as e:
                     self.log_message("Error handling client data: " + str(e))
                     self.log_message(traceback.format_exc())
-                    
-                    # Send error response if possible
-                    error_response = {
-                        "status": "error",
-                        "message": str(e)
-                    }
                     try:
-                        # Python 3: encode string to bytes
-                        client.sendall(json.dumps(error_response).encode('utf-8'))
-                    except AttributeError:
-                        # Python 2: string is already bytes
-                        client.sendall(json.dumps(error_response))
-                    except:
-                        # If we can't send the error, the connection is probably dead
+                        send({"status": "error", "message": str(e)})
+                    except Exception:
                         break
-                    
-                    # For serious errors, break the loop
-                    if not isinstance(e, ValueError):
-                        break
+                    break
         except Exception as e:
             self.log_message("Error in client handler: " + str(e))
         finally:
