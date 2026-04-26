@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .DS_Store
+
+# Local MCP client config (machine-specific absolute paths)
+.mcp.json
