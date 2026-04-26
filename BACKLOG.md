@@ -67,7 +67,7 @@ disjoint sets only.
       error than "not found."
       Scope: remote-script (browser/loader investigation; server unchanged)
 
-- [ ] **`get_clip_notes` (read existing notes from a clip).** Currently the
+- [claimed: claude-clipnotes 2026-04-26] **`get_clip_notes` (read existing notes from a clip).** Currently the
       MCP can write notes (`add_notes_to_clip`, `replace_clip_notes`) and
       read automation (`get_clip_envelope`), but cannot read notes back.
       That makes round-trip verification and bug diagnosis nearly impossible
@@ -78,7 +78,7 @@ disjoint sets only.
       issue below.
       Scope: server + remote-script
 
-- [ ] **`clear_clip_notes` silently no-ops on session clips.** Hit during
+- [claimed: claude-clipnotes 2026-04-26] **`clear_clip_notes` silently no-ops on session clips.** Hit during
       lofi-01 (2026-04-25): tool returned `{"cleared": true}` but the clip
       retained all prior notes. Subsequent `add_notes_to_clip` then stacked on
       top of the un-cleared notes, producing phase-cancellation transients
