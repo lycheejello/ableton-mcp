@@ -201,6 +201,7 @@ class AbletonMCP(ControlSurface):
             "get_track_info":            (False, lambda p: s._get_track_info(p.get("track_index", 0))),
             "list_devices":              (False, lambda p: s._list_devices(p.get("track_index", 0))),
             "get_device_parameters":     (False, lambda p: s._get_device_parameters(p.get("track_index", 0), p.get("device_index", 0))),
+            "get_track_sends":           (False, lambda p: s._get_track_sends(p.get("track_index", 0))),
             "list_arrangement_clips":    (False, lambda p: s._list_arrangement_clips(p.get("track_index", 0))),
             "get_clip_envelope":         (False, lambda p: s._get_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("is_arrangement", False))),
             "get_clip_notes":            (False, lambda p: s._get_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("is_arrangement", False))),
@@ -214,6 +215,7 @@ class AbletonMCP(ControlSurface):
             "set_track_pan":                   (True, lambda p: s._set_track_pan(p.get("track_index", 0), p.get("value"))),
             "set_track_mute":                  (True, lambda p: s._set_track_mute(p.get("track_index", 0), p.get("mute", False))),
             "set_track_solo":                  (True, lambda p: s._set_track_solo(p.get("track_index", 0), p.get("solo", False))),
+            "set_track_send":                  (True, lambda p: s._set_track_send(p.get("track_index", 0), p.get("send_index", 0), p.get("value"))),
             "set_master_volume":               (True, lambda p: s._set_master_volume(p.get("value"))),
             "set_master_pan":                  (True, lambda p: s._set_master_pan(p.get("value"))),
             "create_clip":                     (True, lambda p: s._create_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("length", 4.0))),
@@ -367,6 +369,10 @@ class AbletonMCP(ControlSurface):
                 "arm": track.arm,
                 "volume": track.mixer_device.volume.value,
                 "panning": track.mixer_device.panning.value,
+                "sends": [
+                    {"index": i, "value": send.value, "min": send.min, "max": send.max}
+                    for i, send in enumerate(track.mixer_device.sends)
+                ],
                 "clip_slots": clip_slots,
                 "devices": devices
             }
@@ -802,6 +808,47 @@ class AbletonMCP(ControlSurface):
             return {"track_index": track_index, "panning": new_value}
         except Exception as e:
             self.log_message("Error setting track pan: " + str(e))
+            raise
+
+    def _get_track_sends(self, track_index):
+        """List a track's sends. Each send routes to the return track at the same index in song.return_tracks.
+
+        Live native float (0.0–1.0). Use return-track names to map "more reverb" → send index.
+        """
+        try:
+            track = self._get_track_or_raise(track_index)
+            sends = track.mixer_device.sends
+            returns = list(self._song.return_tracks)
+            send_list = []
+            for i, send in enumerate(sends):
+                return_name = returns[i].name if i < len(returns) else None
+                send_list.append({
+                    "index": i,
+                    "return_track_name": return_name,
+                    "value": send.value,
+                    "min": send.min,
+                    "max": send.max,
+                })
+            return {
+                "track_index": track_index,
+                "track_name": track.name,
+                "sends": send_list,
+            }
+        except Exception as e:
+            self.log_message("Error getting track sends: " + str(e))
+            raise
+
+    def _set_track_send(self, track_index, send_index, value):
+        """Set a track's send level (Live native float, 0.0–1.0). send_index addresses song.return_tracks[send_index]."""
+        try:
+            track = self._get_track_or_raise(track_index)
+            sends = track.mixer_device.sends
+            if send_index < 0 or send_index >= len(sends):
+                raise IndexError("Send index out of range")
+            new_value = self._set_mixer_param(sends[send_index], value)
+            return {"track_index": track_index, "send_index": send_index, "value": new_value}
+        except Exception as e:
+            self.log_message("Error setting track send: " + str(e))
             raise
 
     def _set_track_mute(self, track_index, mute):

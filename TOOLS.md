@@ -32,6 +32,8 @@ or deleted — re-list before mutating.
 | `set_track_pan` | `(track_index, value: float)` | Pan, -1.0–1.0; 0.0 = center. |
 | `set_track_mute` | `(track_index, mute: bool)` | Set the mute flag. |
 | `set_track_solo` | `(track_index, solo: bool)` | Set the solo flag. |
+| `get_track_sends` | `(track_index)` | List a track's sends with the matching return-track names. |
+| `set_track_send` | `(track_index, send_index, value: float)` | Send level to `return_tracks[send_index]`, 0.0–1.0. |
 | `set_master_volume` | `(value: float)` | Master volume, 0.0–1.0. |
 | `set_master_pan` | `(value: float)` | Master pan, -1.0–1.0. |
 

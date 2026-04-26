@@ -20,6 +20,7 @@ logger = logging.getLogger("AbletonMCPServer")
 _MODIFYING_COMMANDS = frozenset({
     "create_midi_track", "create_audio_track", "set_track_name",
     "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+    "set_track_send",
     "set_master_volume", "set_master_pan",
     "create_clip", "add_notes_to_clip", "set_clip_name",
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
@@ -342,6 +343,30 @@ def set_track_solo(ctx: Context, track_index: int, solo: bool) -> str:
     - solo: True to solo, False to clear
     """
     return _forward("set_track_solo", {"track_index": track_index, "solo": solo})
+
+@mcp.tool()
+def get_track_sends(ctx: Context, track_index: int) -> str:
+    """
+    List a track's sends (return routing). Each send routes to the return track
+    at the matching index in the song's return tracks; the response includes
+    each return's name so "more reverb on the vocal" can be mapped to a send index.
+
+    Parameters:
+    - track_index: Index into song.tracks (regular tracks; master/returns not supported)
+    """
+    return _forward("get_track_sends", {"track_index": track_index})
+
+@mcp.tool()
+def set_track_send(ctx: Context, track_index: int, send_index: int, value: float) -> str:
+    """
+    Set a track's send level (return routing).
+
+    Parameters:
+    - track_index: Index into song.tracks (regular tracks only)
+    - send_index: Index into the track's send list; matches song.return_tracks[send_index]
+    - value: Live-native float, 0.0–1.0 (0.85 ≈ 0 dB, same convention as volume)
+    """
+    return _forward("set_track_send", {"track_index": track_index, "send_index": send_index, "value": value})
 
 @mcp.tool()
 def set_master_volume(ctx: Context, value: float) -> str:
