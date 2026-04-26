@@ -39,17 +39,21 @@ disjoint sets only.
 
 - [ ] **Position-aware cue placement — `place_cue(beat, name=None)`.**
       Today, placing N cues at known positions takes 2N round-trips
-      (`set_transport_position` then `set_or_delete_cue`) plus an
-      observed cursor-lag race: `set_or_delete_cue` toggles ~0.5–2.7 beats
-      off the previously-requested position because the next call fires
-      before the cursor settles. A direct positional setter sidesteps
-      both. If `CuePoint`-level positional add isn't exposed in the LOM,
-      either (a) hide the cursor dance behind the tool with a settled-
-      cursor wait, or (b) document the LOM gap and keep the dance with a
-      sync barrier. Pairs naturally with the rename item — same call can
-      take a name. Discovered 2026-04-26 during /interpret-notes smoke test.
-      LOM: investigate `Song.cue_points` mutability + `Song.set_or_delete_cue`
-      semantics under rapid `current_song_time` writes.
+      (`set_transport_position` then `set_or_delete_cue`) and is coupled
+      to transport state: if playback is running, the cursor advances
+      between the position-set and the toggle, so the toggle reads an
+      offset cursor. Live snaps cue creation to grid so this is mostly
+      cosmetic (final cues land clean), but the toggle's reported
+      `at_beat` is misleading and the API shape encourages the caller
+      to call `stop_playback` defensively. A direct positional setter
+      decouples cue placement from transport entirely and halves
+      round-trips. If `CuePoint`-level positional add isn't exposed in
+      the LOM, hide the cursor dance behind the tool with a transport-
+      independent flow. Pairs naturally with the rename item — same call
+      can take a name. Discovered 2026-04-26 during /interpret-notes
+      smoke test (placement during live playback).
+      LOM: investigate `Song.cue_points` mutability + alternatives to
+      `Song.set_or_delete_cue` for headless placement.
       Scope: server + remote-script
 
 - [ ] **Remove dead `is_arrangement=True` plumbing from envelope tools.**
