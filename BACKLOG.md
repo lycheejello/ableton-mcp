@@ -25,7 +25,7 @@ disjoint sets only.
 
 ## Open
 
-- [ ] **Arrangement-view automation (track-lane + per-clip)** — supersedes the
+- [claimed: claude-arrautomation 2026-04-26] **Arrangement-view automation (track-lane + per-clip)** — supersedes the
       former two separate items. Smoke test on 2026-04-25 (1.3.0) proved
       `Clip.automation_envelope` rejects arrangement clips for ANY param type
       (mixer AND device — earlier reference-doc claim that device params
