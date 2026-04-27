@@ -232,6 +232,10 @@ class AbletonMCP(ControlSurface):
             "jump_to_cue":                     (True, lambda p: s._jump_to_cue(p.get("cue_index", 0))),
             "jump_to_next_cue":                (True, lambda p: s._jump_to_next_cue()),
             "jump_to_prev_cue":                (True, lambda p: s._jump_to_prev_cue()),
+            "undo":                            (True, lambda p: s._undo()),
+            "redo":                            (True, lambda p: s._redo()),
+            "begin_undo_step":                 (True, lambda p: s._begin_undo_step()),
+            "end_undo_step":                   (True, lambda p: s._end_undo_step()),
             "save_session":                    (True, lambda p: s._save_session()),
             "save_session_as":                 (True, lambda p: s._save_session_as(p.get("path", ""))),
             "delete_session_clip":             (True, lambda p: s._delete_session_clip(p.get("track_index", 0), p.get("clip_slot_index", 0))),
@@ -910,6 +914,46 @@ class AbletonMCP(ControlSurface):
             return {"jumped": True, "current_beat": self._song.current_song_time}
         except Exception as e:
             self.log_message("Error jumping to prev cue: " + str(e))
+            raise
+
+    def _undo(self):
+        """Undo the last user-visible step in Live's undo history (no-op if nothing to undo)."""
+        try:
+            if not self._song.can_undo:
+                return {"undone": False, "can_undo": False, "can_redo": self._song.can_redo}
+            self._song.undo()
+            return {"undone": True, "can_undo": self._song.can_undo, "can_redo": self._song.can_redo}
+        except Exception as e:
+            self.log_message("Error in undo: " + str(e))
+            raise
+
+    def _redo(self):
+        """Redo the next step in Live's undo history (no-op if nothing to redo)."""
+        try:
+            if not self._song.can_redo:
+                return {"redone": False, "can_undo": self._song.can_undo, "can_redo": False}
+            self._song.redo()
+            return {"redone": True, "can_undo": self._song.can_undo, "can_redo": self._song.can_redo}
+        except Exception as e:
+            self.log_message("Error in redo: " + str(e))
+            raise
+
+    def _begin_undo_step(self):
+        """Open an undo group; subsequent edits collapse into one user-visible undo entry until end_undo_step()."""
+        try:
+            self._song.begin_undo_step()
+            return {"ok": True}
+        except Exception as e:
+            self.log_message("Error in begin_undo_step: " + str(e))
+            raise
+
+    def _end_undo_step(self):
+        """Close the undo group opened by begin_undo_step()."""
+        try:
+            self._song.end_undo_step()
+            return {"ok": True, "can_undo": self._song.can_undo, "can_redo": self._song.can_redo}
+        except Exception as e:
+            self.log_message("Error in end_undo_step: " + str(e))
             raise
 
     def _set_track_mute(self, track_index, mute):

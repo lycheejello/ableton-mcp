@@ -34,6 +34,7 @@ _MODIFYING_COMMANDS = frozenset({
     "set_transport_position", "save_session", "save_session_as",
     "delete_session_clip",
     "set_or_delete_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
+    "undo", "redo", "begin_undo_step", "end_undo_step",
 })
 
 @dataclass
@@ -659,6 +660,49 @@ def jump_to_prev_cue(ctx: Context) -> str:
     No-op if there is no previous cue (returns jumped=False).
     """
     return _forward("jump_to_prev_cue")
+
+@mcp.tool()
+def undo(ctx: Context) -> str:
+    """
+    Undo the last user-visible step in Live's undo history.
+
+    No-op if there is nothing to undo (returns undone=False). Pair with
+    begin_undo_step/end_undo_step to make a multi-call agent revision collapse
+    into one user-visible undo entry.
+    """
+    return _forward("undo")
+
+@mcp.tool()
+def redo(ctx: Context) -> str:
+    """
+    Redo the next step in Live's undo history.
+
+    No-op if there is nothing to redo (returns redone=False).
+    """
+    return _forward("redo")
+
+@mcp.tool()
+def begin_undo_step(ctx: Context) -> str:
+    """
+    Open an undo group. All bridge edits between this call and end_undo_step()
+    collapse into a single user-visible undo entry in Live.
+
+    Use this to wrap a complete agent revision (e.g. "more reverb on vocals in
+    the bridge" might fan out to a dozen send/EQ/cue calls) so the user can back
+    it out with a single Cmd+Z. Always pair with end_undo_step(); leaving a step
+    open will fold subsequent unrelated edits into the same undo entry.
+    """
+    return _forward("begin_undo_step")
+
+@mcp.tool()
+def end_undo_step(ctx: Context) -> str:
+    """
+    Close the undo group opened by begin_undo_step().
+
+    Safe to call without a matching begin (Live ignores it). Returns the
+    post-step can_undo/can_redo flags.
+    """
+    return _forward("end_undo_step")
 
 @mcp.tool()
 def save_session(ctx: Context) -> str:
