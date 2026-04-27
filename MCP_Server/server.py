@@ -33,7 +33,7 @@ _MODIFYING_COMMANDS = frozenset({
     "add_clip_envelope_point", "clear_clip_envelope",
     "set_transport_position", "save_session", "save_session_as",
     "delete_session_clip",
-    "set_or_delete_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
+    "set_or_delete_cue", "set_cue_name", "place_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
     "undo", "redo", "begin_undo_step", "end_undo_step",
 })
 
@@ -629,6 +629,45 @@ def set_or_delete_cue(ctx: Context) -> str:
     set_transport_position(beats=...) first to place the cursor.
     """
     return _forward("set_or_delete_cue")
+
+@mcp.tool()
+def place_cue(ctx: Context, beat: float, name: str = "") -> str:
+    """
+    Place a cue point at the given beat, optionally naming it in the same call.
+
+    Idempotent: if a cue already exists at the snapped beat, reuses it (created=False
+    in the response) rather than toggling it off. Decoupled from transport — stops
+    playback if running and restores both the cursor and play state on exit, so the
+    user's view doesn't visibly jump.
+
+    Prefer this over the (set_transport_position → set_or_delete_cue → set_cue_name)
+    sequence: it's one round-trip, race-free under playback, and cannot accidentally
+    delete an existing cue.
+
+    Parameters:
+    - beat: Beat position. Live snaps cue creation to grid; the response's `time`
+      reflects the snapped position actually used.
+    - name: Optional name. Empty string leaves the cue's existing name untouched.
+    """
+    return _forward("place_cue", {"beat": beat, "name": name or None})
+
+@mcp.tool()
+def set_cue_name(ctx: Context, cue_index: int, name: str) -> str:
+    """
+    Rename the cue point at the given index.
+
+    Cue names are how the mix-notes interpreter binds locator-scoped notes
+    ("in the bridge", "at the drop") to a beat — placing a cue with
+    set_or_delete_cue and immediately naming it via this tool is the
+    canonical "author a section marker" sequence.
+
+    Parameters:
+    - cue_index: Index into the list returned by get_cue_points
+    - name: New name for the cue
+
+    Cue indices shift when cues are added/removed — re-list before renaming.
+    """
+    return _forward("set_cue_name", {"cue_index": cue_index, "name": name})
 
 @mcp.tool()
 def jump_to_cue(ctx: Context, cue_index: int) -> str:

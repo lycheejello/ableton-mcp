@@ -229,6 +229,8 @@ class AbletonMCP(ControlSurface):
             "stop_playback":                   (True, lambda p: s._stop_playback()),
             "set_transport_position":          (True, lambda p: s._set_transport_position(p.get("beats", 0.0))),
             "set_or_delete_cue":               (True, lambda p: s._set_or_delete_cue()),
+            "set_cue_name":                    (True, lambda p: s._set_cue_name(p.get("cue_index", 0), p.get("name", ""))),
+            "place_cue":                       (False, lambda p: s._place_cue(p.get("beat", 0.0), p.get("name"))),
             "jump_to_cue":                     (True, lambda p: s._jump_to_cue(p.get("cue_index", 0))),
             "jump_to_next_cue":                (True, lambda p: s._jump_to_next_cue()),
             "jump_to_prev_cue":                (True, lambda p: s._jump_to_prev_cue()),
@@ -879,6 +881,122 @@ class AbletonMCP(ControlSurface):
             return {"cue_count": len(self._song.cue_points), "at_beat": self._song.current_song_time}
         except Exception as e:
             self.log_message("Error toggling cue: " + str(e))
+            raise
+
+    def _place_cue(self, beat, name=None):
+        """Place a cue at `beat` (idempotent; reuses an existing cue at that beat). Optionally rename.
+        Decoupled from transport: stops playback first to avoid races, restores cursor + play state on exit.
+
+        Implementation: this handler runs off-main (in the socket thread). It hops short main-thread
+        steps via schedule_message, with real wall-clock sleeps in between so Live's main thread has
+        time to actually commit the cursor assignment between scheduled callbacks. schedule_message
+        ticks alone don't span enough frames — the cursor stays stale within a single message-pump
+        cycle. CuePoint.time is read-only so we can't post-correct a misplaced cue.
+        """
+        target = float(beat)
+        state = {}
+        errors = []
+
+        def run_on_main(fn, wait=2.0):
+            ev = threading.Event()
+            box = {}
+            def wrapper():
+                try:
+                    box["v"] = fn()
+                except Exception as e:
+                    box["err"] = str(e)
+                finally:
+                    ev.set()
+            try:
+                self.schedule_message(0, wrapper)
+            except AssertionError:
+                wrapper()
+            if not ev.wait(timeout=wait):
+                raise RuntimeError("place_cue: main-thread step timed out")
+            if "err" in box:
+                raise RuntimeError(box["err"])
+            return box.get("v")
+
+        # Step 1: snapshot transport, fast-path idempotency, then assign cursor.
+        def s1():
+            state["was_playing"] = self._song.is_playing
+            state["prior_time"] = self._song.current_song_time
+            self._song.stop_playing()
+            for i, cue in enumerate(self._song.cue_points):
+                if abs(cue.time - target) < 1e-6:
+                    if name:
+                        cue.name = name
+                    state["fast_path"] = {
+                        "cue_index": i, "name": cue.name, "time": cue.time, "created": False,
+                    }
+                    if state["was_playing"]:
+                        self._song.start_playing()
+                    return
+            state["existing_times"] = sorted(c.time for c in self._song.cue_points)
+            self._song.current_song_time = target
+
+        run_on_main(s1)
+        if "fast_path" in state:
+            return state["fast_path"]
+
+        # Wall-clock yield so Live's main thread can commit the cursor assignment.
+        time.sleep(0.1)
+
+        # Step 2: toggle. Cursor should now be at target.
+        def s2():
+            self._song.set_or_delete_cue()
+        run_on_main(s2)
+
+        time.sleep(0.05)
+
+        # Step 3: read cue list, identify new cue, name it, restore transport.
+        def s3():
+            new_times = sorted(c.time for c in self._song.cue_points)
+            if len(new_times) < len(state["existing_times"]):
+                # Toggle deleted a cue at the cursor — re-toggle to restore, then fail cleanly.
+                self._song.set_or_delete_cue()
+                self._song.current_song_time = state["prior_time"]
+                if state["was_playing"]:
+                    self._song.start_playing()
+                raise RuntimeError("place_cue could not toggle on a free position; aborted to preserve existing cues")
+            added = [t for t in new_times if t not in set(state["existing_times"])]
+            if not added:
+                raise RuntimeError("place_cue: toggle did not produce a new cue")
+            new_time = added[0]
+            cue_index = None
+            cue_obj = None
+            for i, cue in enumerate(self._song.cue_points):
+                if abs(cue.time - new_time) < 1e-6:
+                    cue_index = i
+                    cue_obj = cue
+                    break
+            if cue_obj is None:
+                raise RuntimeError("place_cue: lost track of newly created cue")
+            if name:
+                cue_obj.name = name
+            result = {
+                "cue_index": cue_index,
+                "name": cue_obj.name,
+                "time": cue_obj.time,
+                "created": True,
+            }
+            self._song.current_song_time = state["prior_time"]
+            if state["was_playing"]:
+                self._song.start_playing()
+            return result
+
+        return run_on_main(s3)
+
+    def _set_cue_name(self, cue_index, name):
+        """Rename the cue at the given index (cue_points are positional and shift if cues are added/removed)."""
+        try:
+            cues = self._song.cue_points
+            if cue_index < 0 or cue_index >= len(cues):
+                raise IndexError("Cue index out of range")
+            cues[cue_index].name = name
+            return {"cue_index": cue_index, "name": cues[cue_index].name, "time": cues[cue_index].time}
+        except Exception as e:
+            self.log_message("Error setting cue name: " + str(e))
             raise
 
     def _jump_to_cue(self, cue_index):
