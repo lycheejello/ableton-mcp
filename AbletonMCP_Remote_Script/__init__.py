@@ -204,7 +204,7 @@ class AbletonMCP(ControlSurface):
             "get_track_sends":           (False, lambda p: s._get_track_sends(p.get("track_index", 0))),
             "get_cue_points":            (False, lambda p: s._get_cue_points()),
             "list_arrangement_clips":    (False, lambda p: s._list_arrangement_clips(p.get("track_index", 0))),
-            "get_clip_envelope":         (False, lambda p: s._get_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("is_arrangement", False))),
+            "get_clip_envelope":         (False, lambda p: s._get_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""))),
             "get_clip_notes":            (False, lambda p: s._get_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("is_arrangement", False))),
             "get_browser_item":          (False, lambda p: s._get_browser_item(p.get("uri"), p.get("path"))),
             "get_browser_tree":          (False, lambda p: s.get_browser_tree(p.get("category_type", "all"))),
@@ -238,8 +238,6 @@ class AbletonMCP(ControlSurface):
             "redo":                            (True, lambda p: s._redo()),
             "begin_undo_step":                 (True, lambda p: s._begin_undo_step()),
             "end_undo_step":                   (True, lambda p: s._end_undo_step()),
-            "save_session":                    (True, lambda p: s._save_session()),
-            "save_session_as":                 (True, lambda p: s._save_session_as(p.get("path", ""))),
             "delete_session_clip":             (True, lambda p: s._delete_session_clip(p.get("track_index", 0), p.get("clip_slot_index", 0))),
             "load_browser_item":               (True, lambda p: s._load_browser_item(p.get("track_index", 0), p.get("item_uri", ""))),
             "set_device_parameter":            (True, lambda p: s._set_device_parameter(p.get("track_index", 0), p.get("device_index", 0), p.get("parameter_index", 0), p.get("value"))),
@@ -252,8 +250,8 @@ class AbletonMCP(ControlSurface):
             "set_arrangement_loop":            (True, lambda p: s._set_arrangement_loop(p.get("start_beats", 0.0), p.get("length_beats", 16.0))),
             "clear_clip_notes":                (True, lambda p: s._clear_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("is_arrangement", False))),
             "replace_clip_notes":              (True, lambda p: s._replace_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []), p.get("is_arrangement", False))),
-            "add_clip_envelope_point":         (True, lambda p: s._add_clip_envelope_point(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("time", 0.0), p.get("value", 0.0), p.get("is_arrangement", False))),
-            "clear_clip_envelope":             (True, lambda p: s._clear_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("is_arrangement", False))),
+            "add_clip_envelope_point":         (True, lambda p: s._add_clip_envelope_point(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("time", 0.0), p.get("value", 0.0))),
+            "clear_clip_envelope":             (True, lambda p: s._clear_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""))),
         }
 
     def _process_command(self, command):
@@ -525,7 +523,7 @@ class AbletonMCP(ControlSurface):
             raise IndexError("Arrangement clip index out of range (track has {0})".format(len(clips)))
         return clips[arr_clip_index]
 
-    def _get_clip_for_envelope(self, track_index, clip_index, is_arrangement):
+    def _get_clip(self, track_index, clip_index, is_arrangement):
         if track_index < 0 or track_index >= len(self._song.tracks):
             raise IndexError("Track index out of range")
         track = self._song.tracks[track_index]
@@ -663,14 +661,14 @@ class AbletonMCP(ControlSurface):
         clip.remove_notes_extended(0, 128, 0.0, max(clip.length, 1.0))
 
     def _clear_clip_notes(self, track_index, clip_index, is_arrangement):
-        _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        _, clip = self._get_clip(track_index, clip_index, is_arrangement)
         if not clip.is_midi_clip:
             raise Exception("Clip is not a MIDI clip")
         self._remove_all_notes(clip)
         return {"cleared": True}
 
     def _replace_clip_notes(self, track_index, clip_index, notes, is_arrangement):
-        _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        _, clip = self._get_clip(track_index, clip_index, is_arrangement)
         if not clip.is_midi_clip:
             raise Exception("Clip is not a MIDI clip")
         self._remove_all_notes(clip)
@@ -680,7 +678,7 @@ class AbletonMCP(ControlSurface):
         return {"note_count": len(specs)}
 
     def _get_clip_notes(self, track_index, clip_index, is_arrangement):
-        _, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+        _, clip = self._get_clip(track_index, clip_index, is_arrangement)
         if not clip.is_midi_clip:
             raise Exception("Clip is not a MIDI clip")
         # get_notes_extended(from_pitch, pitch_span, from_time, time_span)
@@ -698,12 +696,22 @@ class AbletonMCP(ControlSurface):
         ]
         return {"note_count": len(notes), "notes": notes}
 
-    def _add_clip_envelope_point(self, track_index, clip_index, parameter_path, time, value, is_arrangement):
-        # Live's clip.automation_envelope rejects arrangement clips for ANY param type
-        # (confirmed 2026-04-25 with both mixer and device params). The is_arrangement
-        # branch is wired but currently always errors — arrangement automation needs a
-        # different LOM API which we haven't located yet.
-        track, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+    def _get_session_clip_for_envelope(self, track_index, clip_index):
+        # Envelope tools are session-only: Clip.automation_envelope() returns None for
+        # arrangement clips, and Live 12's documented Python LOM has no track-level
+        # arrangement-automation write API.
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("Clip slot index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise Exception("No clip in slot")
+        return track, slot.clip
+
+    def _add_clip_envelope_point(self, track_index, clip_index, parameter_path, time, value):
+        track, clip = self._get_session_clip_for_envelope(track_index, clip_index)
         param = self._resolve_parameter(track, parameter_path)
         if not (param.min <= value <= param.max):
             raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, param.min, param.max, param.name))
@@ -716,8 +724,8 @@ class AbletonMCP(ControlSurface):
         env.insert_step(time, 0.0, value)
         return {"parameter": param.name, "time": time, "value": value}
 
-    def _clear_clip_envelope(self, track_index, clip_index, parameter_path, is_arrangement):
-        track, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+    def _clear_clip_envelope(self, track_index, clip_index, parameter_path):
+        track, clip = self._get_session_clip_for_envelope(track_index, clip_index)
         param = self._resolve_parameter(track, parameter_path)
         try:
             clip.clear_envelope(param)
@@ -725,8 +733,8 @@ class AbletonMCP(ControlSurface):
             raise Exception("Clip.clear_envelope is not available in this Live version")
         return {"parameter": param.name, "cleared": True}
 
-    def _get_clip_envelope(self, track_index, clip_index, parameter_path, is_arrangement):
-        track, clip = self._get_clip_for_envelope(track_index, clip_index, is_arrangement)
+    def _get_clip_envelope(self, track_index, clip_index, parameter_path):
+        track, clip = self._get_session_clip_for_envelope(track_index, clip_index)
         param = self._resolve_parameter(track, parameter_path)
         env = None
         try:
@@ -1286,38 +1294,6 @@ class AbletonMCP(ControlSurface):
             return {"song_time": self._song.current_song_time}
         except Exception as e:
             self.log_message("Error setting transport position: " + str(e))
-            raise
-
-    def _save_session(self):
-        """Save the current Live set to its existing path. Fails for unsaved sets."""
-        try:
-            try:
-                self._song.save_song()
-            except AttributeError:
-                raise Exception("Song.save_song is not available in this Live version")
-            except RuntimeError as e:
-                # Live raises RuntimeError for untitled sets ("set has no path yet").
-                raise Exception("Cannot save: set has no path yet. Use save_session_as(path) instead. ({0})".format(e))
-            return {"saved": True}
-        except Exception as e:
-            self.log_message("Error saving session: " + str(e))
-            raise
-
-    def _save_session_as(self, path):
-        """Save the current Live set to a new path. path must be absolute and end in .als."""
-        try:
-            if not path:
-                raise ValueError("path is required")
-            song = self._song
-            # Live's Python LOM doesn't expose a documented save-as on Song in all
-            # versions; try a few names and surface a clear error if none exist.
-            saver = getattr(song, "save_song_as", None) or getattr(song, "save_as", None)
-            if saver is None:
-                raise Exception("No save-as API on Song in this Live version (tried save_song_as, save_as)")
-            saver(path)
-            return {"saved": True, "path": path}
-        except Exception as e:
-            self.log_message("Error saving session as: " + str(e))
             raise
 
     def _delete_session_clip(self, track_index, clip_slot_index):
