@@ -715,13 +715,17 @@ class AbletonMCP(ControlSurface):
         param = self._resolve_parameter(track, parameter_path)
         if not (param.min <= value <= param.max):
             raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, param.min, param.max, param.name))
+        if time < 0 or time >= clip.length:
+            raise ValueError("time {0} out of clip range [0, {1})".format(time, clip.length))
         try:
             env = clip.automation_envelope(param)
             if env is None:
                 env = clip.create_automation_envelope(param)
         except AttributeError:
             raise Exception("Clip envelope API not available in this Live version")
-        env.insert_step(time, 0.0, value)
+        # insert_step writes a flat-value region; length 0 is a no-op. Extend to clip end so
+        # the point persists until overridden by a later insert_step (breakpoint semantics).
+        env.insert_step(time, clip.length - time, value)
         return {"parameter": param.name, "time": time, "value": value}
 
     def _clear_clip_envelope(self, track_index, clip_index, parameter_path):
