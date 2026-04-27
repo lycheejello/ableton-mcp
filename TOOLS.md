@@ -91,7 +91,7 @@ Note dict shape: `{pitch, start_time, duration, velocity, mute}`.
 
 | Tool | Signature | Purpose |
 | --- | --- | --- |
-| `add_clip_envelope_point` | `(track_index, clip_index, parameter_path, time, value, is_arrangement=False)` | Add an automation point. Session clips only — `is_arrangement=True` currently errors at the LOM (see BACKLOG). |
+| `add_clip_envelope_point` | `(track_index, clip_index, parameter_path, time, value, is_arrangement=False)` | Add an automation point. Session clips only — `is_arrangement=True` currently errors at the LOM (see SZO-5). |
 | `clear_clip_envelope` | `(track_index, clip_index, parameter_path, is_arrangement=False)` | Remove all envelope points for one parameter. |
 | `get_clip_envelope` | `(track_index, clip_index, parameter_path, is_arrangement=False)` | Sample envelope at integer beats — coarse sanity check. |
 

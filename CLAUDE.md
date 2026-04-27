@@ -19,3 +19,7 @@ The Remote Script side has no separate cache, but bumping anyway keeps the versi
 ## Smoke-test convention
 
 Use `tools/probe.py` for live-Ableton smoke tests of new bridge tools — it bypasses the MCP server and the `uvx` cache, so iteration is just "restart Live → probe."
+
+## Where backlog lives
+
+**Linear is the source of truth for bridge work.** Workspace `scherzo`, team `SZO`. Always check Linear first before starting new work — there's no `BACKLOG.md` (deleted 2026-04-26 after the last items were migrated). File new gaps as Linear issues directly; the `mcp__linear__save_issue` tool is registered in this project.
