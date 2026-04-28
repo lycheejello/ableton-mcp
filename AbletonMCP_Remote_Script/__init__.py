@@ -234,6 +234,11 @@ class AbletonMCP(ControlSurface):
             "set_return_track_pan":            (True, lambda p: s._set_return_track_pan(p.get("return_index", 0), p.get("value"))),
             "set_return_track_mute":           (True, lambda p: s._set_return_track_mute(p.get("return_index", 0), p.get("mute", False))),
             "set_return_track_solo":           (True, lambda p: s._set_return_track_solo(p.get("return_index", 0), p.get("solo", False))),
+            "get_master_track_info":           (False, lambda p: s._get_master_track_info()),
+            "list_master_devices":             (False, lambda p: s._list_master_devices()),
+            "get_master_device_parameters":    (False, lambda p: s._get_master_device_parameters(p.get("device_index", 0))),
+            "set_master_device_parameter":     (True, lambda p: s._set_master_device_parameter(p.get("device_index", 0), p.get("parameter_index", 0), p.get("value"))),
+            "load_master_effect":              (True, lambda p: s._load_master_effect(p.get("item_uri", ""))),
             "create_clip":                     (True, lambda p: s._create_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("length", 4.0))),
             "add_notes_to_clip":               (True, lambda p: s._add_notes_to_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []))),
             "set_clip_name":                   (True, lambda p: s._set_clip_name(p.get("track_index", 0), p.get("clip_index", 0), p.get("name", ""))),
@@ -1453,6 +1458,125 @@ class AbletonMCP(ControlSurface):
             return {"return_index": return_index, "solo": track.solo}
         except Exception as e:
             self.log_message("Error setting return-track solo: " + str(e))
+            raise
+
+    # Master-track device surface --------------------------------------------
+    # song.master_track is a single track outside song.tracks. Only its mixer
+    # was reachable (set_master_volume/pan). These add the device chain.
+
+    def _get_master_track_info(self):
+        try:
+            track = self._song.master_track
+            devices = []
+            for i, d in enumerate(track.devices):
+                devices.append({
+                    "index": i,
+                    "name": d.name,
+                    "class_name": d.class_name,
+                    "type": self._get_device_type(d),
+                })
+            return {
+                "name": track.name,
+                "volume": track.mixer_device.volume.value,
+                "panning": track.mixer_device.panning.value,
+                "devices": devices,
+            }
+        except Exception as e:
+            self.log_message("Error getting master-track info: " + str(e))
+            raise
+
+    def _list_master_devices(self):
+        try:
+            track = self._song.master_track
+            devices = []
+            for i, d in enumerate(track.devices):
+                devices.append({
+                    "index": i,
+                    "name": d.name,
+                    "class_name": d.class_name,
+                    "type": self._get_device_type(d),
+                })
+            return {"track_name": track.name, "devices": devices}
+        except Exception as e:
+            self.log_message("Error listing master devices: " + str(e))
+            raise
+
+    def _get_master_device_parameters(self, device_index):
+        try:
+            track = self._song.master_track
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            params = []
+            for i, p in enumerate(device.parameters):
+                value_items = None
+                if p.is_quantized:
+                    try:
+                        value_items = list(p.value_items)
+                    except Exception:
+                        value_items = None
+                params.append({
+                    "index": i,
+                    "name": p.name,
+                    "value": p.value,
+                    "min": p.min,
+                    "max": p.max,
+                    "is_quantized": p.is_quantized,
+                    "value_items": value_items,
+                })
+            return {
+                "device_index": device_index,
+                "device_name": device.name,
+                "class_name": device.class_name,
+                "parameters": params,
+            }
+        except Exception as e:
+            self.log_message("Error getting master device parameters: " + str(e))
+            raise
+
+    def _set_master_device_parameter(self, device_index, parameter_index, value):
+        try:
+            if value is None:
+                raise ValueError("value is required")
+            track = self._song.master_track
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            if parameter_index < 0 or parameter_index >= len(device.parameters):
+                raise IndexError("Parameter index out of range")
+            p = device.parameters[parameter_index]
+            if not (p.min <= value <= p.max):
+                raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, p.min, p.max, p.name))
+            p.value = value
+            return {
+                "device_name": device.name,
+                "parameter_index": parameter_index,
+                "name": p.name,
+                "value": p.value,
+            }
+        except Exception as e:
+            self.log_message("Error setting master device parameter: " + str(e))
+            raise
+
+    def _load_master_effect(self, item_uri):
+        """Load a browser item (audio effect) onto the master track by URI."""
+        try:
+            track = self._song.master_track
+            app = self.application()
+            item = self._find_browser_item_by_uri(app.browser, item_uri)
+            if not item:
+                raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
+            self._song.view.selected_track = track
+            app.browser.load_item(item)
+            return {
+                "loaded": True,
+                "item_name": item.name,
+                "track_name": track.name,
+                "uri": item_uri,
+            }
+        except Exception as e:
+            self.log_message("Error loading master effect: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
             raise
 
     def _create_clip(self, track_index, clip_index, length):

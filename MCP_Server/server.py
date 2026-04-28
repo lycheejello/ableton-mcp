@@ -27,6 +27,7 @@ _MODIFYING_COMMANDS = frozenset({
     "set_return_track_volume", "set_return_track_pan",
     "set_return_track_mute", "set_return_track_solo",
     "set_return_device_parameter", "load_return_effect",
+    "set_master_device_parameter", "load_master_effect",
     "create_clip", "add_notes_to_clip", "set_clip_name",
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
     "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -603,6 +604,78 @@ def set_return_track_solo(ctx: Context, return_index: int, solo: bool) -> str:
     - solo: True to solo, False to clear
     """
     return _forward("set_return_track_solo", {"return_index": return_index, "solo": solo})
+
+# Master track is a single track outside song.tracks. set_master_volume /
+# set_master_pan already exist; these add the device-chain surface for
+# mix-bus polish (glue comp, master EQ, limiter).
+
+@mcp.tool()
+def get_master_track_info(ctx: Context) -> str:
+    """
+    Inspect the master track: name, mixer state, and device chain.
+    """
+    return _forward("get_master_track_info", {})
+
+@mcp.tool()
+def list_master_devices(ctx: Context) -> str:
+    """
+    List the devices on the master track.
+    """
+    return _forward("list_master_devices", {})
+
+@mcp.tool()
+def get_master_device_parameters(ctx: Context, device_index: int) -> str:
+    """
+    Get the parameters of a device on the master track. Same shape as
+    get_device_parameters.
+
+    Parameters:
+    - device_index: Index of the device on the master track
+    """
+    return _forward("get_master_device_parameters", {"device_index": device_index})
+
+@mcp.tool()
+def set_master_device_parameter(
+    ctx: Context,
+    device_index: int,
+    parameter_index: int,
+    value: float,
+) -> str:
+    """
+    Set a single device parameter on the master track. Same semantics as
+    set_device_parameter (call get_master_device_parameters first; do not
+    cache indices across sessions).
+
+    Parameters:
+    - device_index: Index of the device on the master track
+    - parameter_index: Index of the parameter
+    - value: New value (continuous: within [min, max]; quantized: integer
+      index into value_items)
+    """
+    return _forward("set_master_device_parameter", {
+        "device_index": device_index,
+        "parameter_index": parameter_index,
+        "value": value,
+    })
+
+@mcp.tool()
+def load_master_effect(ctx: Context, uri: str) -> str:
+    """
+    Load an audio effect onto the master track using its URI. Mirrors
+    load_return_effect for the master bus; instruments don't apply
+    (master is audio-only).
+
+    Parameters:
+    - uri: Browser item URI (use get_browser_items_at_path to find one)
+    """
+    try:
+        result = _call("load_master_effect", {"item_uri": uri})
+        if not result.get("loaded", False):
+            return f"Failed to load effect with URI '{uri}'"
+        return f"Loaded '{result.get('item_name')}' onto master track"
+    except Exception as e:
+        logger.error(f"Error loading master effect: {e}")
+        return f"Error loading master effect: {e}"
 
 @mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
