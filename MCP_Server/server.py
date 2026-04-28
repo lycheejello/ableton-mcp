@@ -18,7 +18,9 @@ logger = logging.getLogger("AbletonMCPServer")
 # Keep in sync with the on_main_thread=True entries in the Remote Script's
 # COMMANDS registry (AbletonMCP_Remote_Script/__init__.py).
 _MODIFYING_COMMANDS = frozenset({
-    "create_midi_track", "create_audio_track", "set_track_name",
+    "create_midi_track", "create_audio_track", "delete_track", "set_track_arm",
+    "set_song_record_mode", "set_input_routing",
+    "set_track_name",
     "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
     "set_track_send",
     "set_master_volume", "set_master_pan",
@@ -290,6 +292,83 @@ def create_midi_track(ctx: Context, index: int = -1) -> str:
     """
     return _forward("create_midi_track", {"index": index})
 
+@mcp.tool()
+def create_audio_track(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new audio track in the Ableton session.
+
+    Used as the destination for printing MIDI tracks to audio (set its input routing
+    to the source MIDI track, arm it, enable record_mode, play through the region).
+
+    Parameters:
+    - index: The index to insert the track at (-1 = end of list)
+    """
+    return _forward("create_audio_track", {"index": index})
+
+@mcp.tool()
+def delete_track(ctx: Context, track_index: int) -> str:
+    """
+    Delete a regular track by index.
+
+    song.tracks excludes master/return tracks (those use separate LOM accessors), so any
+    valid track_index here refers to a regular or group track. Track indices SHIFT after
+    deletion — re-list with get_session_info before deleting more.
+    """
+    return _forward("delete_track", {"track_index": track_index})
+
+@mcp.tool()
+def set_track_arm(ctx: Context, track_index: int, armed: bool) -> str:
+    """
+    Arm or disarm a track for recording.
+
+    Errors on Main and Send tracks (not armable per LOM). Armed tracks accept input
+    when Song.record_mode is enabled and transport is rolling.
+    """
+    return _forward("set_track_arm", {"track_index": track_index, "armed": armed})
+
+@mcp.tool()
+def set_song_record_mode(ctx: Context, enabled: bool) -> str:
+    """
+    Set Song.record_mode — Live's global arrangement-record flag.
+
+    When True and transport is rolling, armed tracks record their input into the
+    arrangement at the current cursor position. Pair with set_track_arm for the
+    print-to-audio workflow.
+    """
+    return _forward("set_song_record_mode", {"enabled": enabled})
+
+@mcp.tool()
+def get_input_routing(ctx: Context, track_index: int) -> str:
+    """
+    Read a track's current input routing + the discoverable lists of available types/channels.
+
+    Returns:
+    - current_type / current_channel: display names of the active routing
+    - available_types: routing source options (e.g. "Ext. In", "1-MIDI", "Resampling", master/return names)
+    - available_channels: subdivisions of the current type (e.g. "Post FX", "1/2", "Pre FX")
+
+    Use this to discover the right type_name + channel_name to pass to set_input_routing.
+    """
+    return _forward("get_input_routing", {"track_index": track_index})
+
+@mcp.tool()
+def set_input_routing(ctx: Context, track_index: int, type_name: str = None, channel_name: str = None) -> str:
+    """
+    Set a track's input routing by display_name.
+
+    For printing a MIDI track to audio: create an audio track, then call this with
+    type_name="<MIDI track name>" and channel_name="Post FX" so the audio track
+    captures the MIDI track's instrument output through its full FX chain.
+
+    Pass None for either argument to leave that side untouched. Errors with the list
+    of available names if the requested name isn't a valid option.
+    """
+    payload = {"track_index": track_index}
+    if type_name is not None:
+        payload["type_name"] = type_name
+    if channel_name is not None:
+        payload["channel_name"] = channel_name
+    return _forward("set_input_routing", payload)
 
 @mcp.tool()
 def set_track_name(ctx: Context, track_index: int, name: str) -> str:

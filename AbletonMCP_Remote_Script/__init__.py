@@ -211,6 +211,12 @@ class AbletonMCP(ControlSurface):
             "get_browser_items_at_path": (False, lambda p: s.get_browser_items_at_path(p.get("path", ""))),
             # State-modifying (main thread)
             "create_midi_track":               (True, lambda p: s._create_midi_track(p.get("index", -1))),
+            "create_audio_track":              (True, lambda p: s._create_audio_track(p.get("index", -1))),
+            "delete_track":                    (True, lambda p: s._delete_track(p.get("track_index", 0))),
+            "set_track_arm":                   (True, lambda p: s._set_track_arm(p.get("track_index", 0), p.get("armed", False))),
+            "set_song_record_mode":            (True, lambda p: s._set_song_record_mode(p.get("enabled", False))),
+            "get_input_routing":               (False, lambda p: s._get_input_routing(p.get("track_index", 0))),
+            "set_input_routing":               (True, lambda p: s._set_input_routing(p.get("track_index", 0), p.get("type_name"), p.get("channel_name"))),
             "set_track_name":                  (True, lambda p: s._set_track_name(p.get("track_index", 0), p.get("name", ""))),
             "set_track_volume":                (True, lambda p: s._set_track_volume(p.get("track_index", 0), p.get("value"))),
             "set_track_pan":                   (True, lambda p: s._set_track_pan(p.get("track_index", 0), p.get("value"))),
@@ -814,11 +820,11 @@ class AbletonMCP(ControlSurface):
         try:
             # Create the track
             self._song.create_midi_track(index)
-            
+
             # Get the new track
             new_track_index = len(self._song.tracks) - 1 if index == -1 else index
             new_track = self._song.tracks[new_track_index]
-            
+
             result = {
                 "index": new_track_index,
                 "name": new_track.name
@@ -827,8 +833,109 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
             raise
-    
-    
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index (or end if index=-1)."""
+        try:
+            self._song.create_audio_track(index)
+            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
+            new_track = self._song.tracks[new_track_index]
+            return {"index": new_track_index, "name": new_track.name}
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
+            raise
+
+    def _delete_track(self, track_index):
+        """Delete a regular track by index. song.tracks excludes master/return so the index is always safe."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            name = self._song.tracks[track_index].name
+            self._song.delete_track(track_index)
+            return {"deleted_index": track_index, "name": name, "remaining": len(self._song.tracks)}
+        except Exception as e:
+            self.log_message("Error deleting track: " + str(e))
+            raise
+
+    def _set_track_arm(self, track_index, armed):
+        """Arm/disarm a track for recording. Errors on Main and Send tracks."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            track.arm = bool(armed)
+            return {"track_index": track_index, "armed": track.arm}
+        except Exception as e:
+            self.log_message("Error setting track arm: " + str(e))
+            raise
+
+    def _set_song_record_mode(self, enabled):
+        """Set Song.record_mode (the global arrangement-record flag)."""
+        try:
+            self._song.record_mode = bool(enabled)
+            return {"record_mode": self._song.record_mode}
+        except Exception as e:
+            self.log_message("Error setting record mode: " + str(e))
+            raise
+
+    def _get_input_routing(self, track_index):
+        """Read a track's current input routing + the discoverable lists of available types/channels."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            cur_type = getattr(track, "input_routing_type", None)
+            cur_chan = getattr(track, "input_routing_channel", None)
+            avail_types = getattr(track, "available_input_routing_types", None) or []
+            avail_chans = getattr(track, "available_input_routing_channels", None) or []
+            return {
+                "track_index": track_index,
+                "current_type": getattr(cur_type, "display_name", None),
+                "current_channel": getattr(cur_chan, "display_name", None),
+                "available_types": [getattr(t, "display_name", None) for t in avail_types],
+                "available_channels": [getattr(c, "display_name", None) for c in avail_chans],
+            }
+        except Exception as e:
+            self.log_message("Error getting input routing: " + str(e))
+            raise
+
+    def _set_input_routing(self, track_index, type_name, channel_name):
+        """Set a track's input routing by display_name. Pass None to leave a side untouched."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if type_name is not None:
+                avail_types = list(track.available_input_routing_types)
+                match = None
+                for t in avail_types:
+                    if getattr(t, "display_name", None) == type_name:
+                        match = t
+                        break
+                if match is None:
+                    names = [getattr(t, "display_name", None) for t in avail_types]
+                    raise ValueError("input routing type '{0}' not in available {1}".format(type_name, names))
+                track.input_routing_type = match
+            if channel_name is not None:
+                avail_chans = list(track.available_input_routing_channels)
+                match = None
+                for c in avail_chans:
+                    if getattr(c, "display_name", None) == channel_name:
+                        match = c
+                        break
+                if match is None:
+                    names = [getattr(c, "display_name", None) for c in avail_chans]
+                    raise ValueError("input routing channel '{0}' not in available {1}".format(channel_name, names))
+                track.input_routing_channel = match
+            return {
+                "track_index": track_index,
+                "current_type": getattr(track.input_routing_type, "display_name", None),
+                "current_channel": getattr(track.input_routing_channel, "display_name", None),
+            }
+        except Exception as e:
+            self.log_message("Error setting input routing: " + str(e))
+            raise
+
     def _set_track_name(self, track_index, name):
         """Set the name of a track"""
         try:
