@@ -887,10 +887,18 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _set_song_record_mode(self, enabled):
-        """Set Song.record_mode (the global arrangement-record flag)."""
+        """Set Song.record_mode (the global arrangement-record flag).
+
+        Returns the requested state, not a readback: assigning record_mode
+        and immediately reading it back returns the *prior* value on the
+        first call from a cold session (Live commits the write on the next
+        tick). Caller knows the request was accepted by the absence of an
+        error; for ground truth, call get_transport_state on a later tick.
+        """
         try:
-            self._song.record_mode = bool(enabled)
-            return {"record_mode": self._song.record_mode}
+            requested = bool(enabled)
+            self._song.record_mode = requested
+            return {"requested_record_mode": requested}
         except Exception as e:
             self.log_message("Error setting record mode: " + str(e))
             raise

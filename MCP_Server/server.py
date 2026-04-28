@@ -339,6 +339,11 @@ def set_song_record_mode(ctx: Context, enabled: bool) -> str:
     When True and transport is rolling, armed tracks record their input into the
     arrangement at the current cursor position. Pair with set_track_arm for the
     print-to-audio workflow.
+
+    Returns {requested_record_mode: bool} — the *requested* state, not a
+    readback. Live commits the write on the next tick, so a same-frame
+    readback lies on the first call from a cold session. Trust the absence
+    of an error; for ground truth, call get_transport_state on a later tick.
     """
     return _forward("set_song_record_mode", {"enabled": enabled})
 
