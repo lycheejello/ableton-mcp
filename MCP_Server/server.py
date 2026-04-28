@@ -24,6 +24,9 @@ _MODIFYING_COMMANDS = frozenset({
     "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
     "set_track_send",
     "set_master_volume", "set_master_pan",
+    "set_return_track_volume", "set_return_track_pan",
+    "set_return_track_mute", "set_return_track_solo",
+    "set_return_device_parameter", "load_return_effect",
     "create_clip", "add_notes_to_clip", "set_clip_name",
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
     "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -468,6 +471,138 @@ def set_master_pan(ctx: Context, value: float) -> str:
     - value: Live-native float, -1.0 (full left) to 1.0 (full right); 0.0 = center
     """
     return _forward("set_master_pan", {"value": value})
+
+# Return tracks live under song.return_tracks, separate from song.tracks. The
+# regular track-addressed tools (set_track_*, list_devices, load_instrument_or_effect,
+# set_device_parameter) all reject return-track indices. Use these variants for
+# send-effect setup (reverb buses, delay throws, etc).
+
+@mcp.tool()
+def get_return_track_info(ctx: Context, return_index: int) -> str:
+    """
+    Inspect a return track: name, mixer state, and device chain. Use
+    get_session_info for the count, then this for per-return detail.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    """
+    return _forward("get_return_track_info", {"return_index": return_index})
+
+@mcp.tool()
+def list_return_devices(ctx: Context, return_index: int) -> str:
+    """
+    List the devices on a return track. Same shape as list_devices.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    """
+    return _forward("list_return_devices", {"return_index": return_index})
+
+@mcp.tool()
+def get_return_device_parameters(ctx: Context, return_index: int, device_index: int) -> str:
+    """
+    Get the parameters of a device on a return track. Same shape as
+    get_device_parameters.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - device_index: Index of the device on that return track
+    """
+    return _forward("get_return_device_parameters", {
+        "return_index": return_index,
+        "device_index": device_index,
+    })
+
+@mcp.tool()
+def set_return_device_parameter(
+    ctx: Context,
+    return_index: int,
+    device_index: int,
+    parameter_index: int,
+    value: float,
+) -> str:
+    """
+    Set a single device parameter on a return track. Same semantics as
+    set_device_parameter (call get_return_device_parameters first; do not
+    cache indices across sessions).
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - device_index: Index of the device on that return track
+    - parameter_index: Index of the parameter
+    - value: New value (continuous: within [min, max]; quantized: integer
+      index into value_items)
+    """
+    return _forward("set_return_device_parameter", {
+        "return_index": return_index,
+        "device_index": device_index,
+        "parameter_index": parameter_index,
+        "value": value,
+    })
+
+@mcp.tool()
+def load_return_effect(ctx: Context, return_index: int, uri: str) -> str:
+    """
+    Load an audio effect onto a return track using its URI. Mirrors
+    load_instrument_or_effect for return tracks; instruments don't apply
+    here (returns are audio-only).
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - uri: Browser item URI (use get_browser_items_at_path to find one)
+    """
+    try:
+        result = _call("load_return_effect", {"return_index": return_index, "item_uri": uri})
+        if not result.get("loaded", False):
+            return f"Failed to load effect with URI '{uri}'"
+        return f"Loaded '{result.get('item_name')}' onto return track {return_index} ({result.get('track_name')})"
+    except Exception as e:
+        logger.error(f"Error loading return effect: {e}")
+        return f"Error loading return effect: {e}"
+
+@mcp.tool()
+def set_return_track_volume(ctx: Context, return_index: int, value: float) -> str:
+    """
+    Set a return track's mixer volume.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - value: Live-native float, 0.0–1.0 (0.85 ≈ 0 dB, 1.0 = +6 dB)
+    """
+    return _forward("set_return_track_volume", {"return_index": return_index, "value": value})
+
+@mcp.tool()
+def set_return_track_pan(ctx: Context, return_index: int, value: float) -> str:
+    """
+    Set a return track's mixer panning.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - value: Live-native float, -1.0 (full left) to 1.0 (full right); 0.0 = center
+    """
+    return _forward("set_return_track_pan", {"return_index": return_index, "value": value})
+
+@mcp.tool()
+def set_return_track_mute(ctx: Context, return_index: int, mute: bool) -> str:
+    """
+    Set a return track's mute flag.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - mute: True to mute, False to unmute
+    """
+    return _forward("set_return_track_mute", {"return_index": return_index, "mute": mute})
+
+@mcp.tool()
+def set_return_track_solo(ctx: Context, return_index: int, solo: bool) -> str:
+    """
+    Set a return track's solo flag.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - solo: True to solo, False to clear
+    """
+    return _forward("set_return_track_solo", {"return_index": return_index, "solo": solo})
 
 @mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:

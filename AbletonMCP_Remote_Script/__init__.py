@@ -225,6 +225,15 @@ class AbletonMCP(ControlSurface):
             "set_track_send":                  (True, lambda p: s._set_track_send(p.get("track_index", 0), p.get("send_index", 0), p.get("value"))),
             "set_master_volume":               (True, lambda p: s._set_master_volume(p.get("value"))),
             "set_master_pan":                  (True, lambda p: s._set_master_pan(p.get("value"))),
+            "get_return_track_info":           (False, lambda p: s._get_return_track_info(p.get("return_index", 0))),
+            "list_return_devices":             (False, lambda p: s._list_return_devices(p.get("return_index", 0))),
+            "get_return_device_parameters":    (False, lambda p: s._get_return_device_parameters(p.get("return_index", 0), p.get("device_index", 0))),
+            "set_return_device_parameter":     (True, lambda p: s._set_return_device_parameter(p.get("return_index", 0), p.get("device_index", 0), p.get("parameter_index", 0), p.get("value"))),
+            "load_return_effect":              (True, lambda p: s._load_return_effect(p.get("return_index", 0), p.get("item_uri", ""))),
+            "set_return_track_volume":         (True, lambda p: s._set_return_track_volume(p.get("return_index", 0), p.get("value"))),
+            "set_return_track_pan":            (True, lambda p: s._set_return_track_pan(p.get("return_index", 0), p.get("value"))),
+            "set_return_track_mute":           (True, lambda p: s._set_return_track_mute(p.get("return_index", 0), p.get("mute", False))),
+            "set_return_track_solo":           (True, lambda p: s._set_return_track_solo(p.get("return_index", 0), p.get("solo", False))),
             "create_clip":                     (True, lambda p: s._create_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("length", 4.0))),
             "add_notes_to_clip":               (True, lambda p: s._add_notes_to_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []))),
             "set_clip_name":                   (True, lambda p: s._set_clip_name(p.get("track_index", 0), p.get("clip_index", 0), p.get("name", ""))),
@@ -1279,7 +1288,173 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error setting master pan: " + str(e))
             raise
-    
+
+    # Return-track surface ----------------------------------------------------
+    # song.return_tracks is parallel to song.tracks but distinct — track-addressed
+    # tools (set_track_volume, list_devices, load_browser_item, ...) reject these
+    # indices, so returns get their own variants here.
+
+    def _get_return_track_or_raise(self, return_index):
+        if return_index < 0 or return_index >= len(self._song.return_tracks):
+            raise IndexError("Return-track index out of range")
+        return self._song.return_tracks[return_index]
+
+    def _get_return_track_info(self, return_index):
+        """Inspect a return track: mixer state + device chain. Mirrors get_track_info but for song.return_tracks[return_index]."""
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            devices = []
+            for i, d in enumerate(track.devices):
+                devices.append({
+                    "index": i,
+                    "name": d.name,
+                    "class_name": d.class_name,
+                    "type": self._get_device_type(d),
+                })
+            return {
+                "return_index": return_index,
+                "name": track.name,
+                "mute": track.mute,
+                "solo": track.solo,
+                "volume": track.mixer_device.volume.value,
+                "panning": track.mixer_device.panning.value,
+                "devices": devices,
+            }
+        except Exception as e:
+            self.log_message("Error getting return-track info: " + str(e))
+            raise
+
+    def _list_return_devices(self, return_index):
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            devices = []
+            for i, d in enumerate(track.devices):
+                devices.append({
+                    "index": i,
+                    "name": d.name,
+                    "class_name": d.class_name,
+                    "type": self._get_device_type(d),
+                })
+            return {"return_index": return_index, "track_name": track.name, "devices": devices}
+        except Exception as e:
+            self.log_message("Error listing return devices: " + str(e))
+            raise
+
+    def _get_return_device_parameters(self, return_index, device_index):
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            params = []
+            for i, p in enumerate(device.parameters):
+                value_items = None
+                if p.is_quantized:
+                    try:
+                        value_items = list(p.value_items)
+                    except Exception:
+                        value_items = None
+                params.append({
+                    "index": i,
+                    "name": p.name,
+                    "value": p.value,
+                    "min": p.min,
+                    "max": p.max,
+                    "is_quantized": p.is_quantized,
+                    "value_items": value_items,
+                })
+            return {
+                "return_index": return_index,
+                "device_index": device_index,
+                "device_name": device.name,
+                "class_name": device.class_name,
+                "parameters": params,
+            }
+        except Exception as e:
+            self.log_message("Error getting return device parameters: " + str(e))
+            raise
+
+    def _set_return_device_parameter(self, return_index, device_index, parameter_index, value):
+        try:
+            if value is None:
+                raise ValueError("value is required")
+            track = self._get_return_track_or_raise(return_index)
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            if parameter_index < 0 or parameter_index >= len(device.parameters):
+                raise IndexError("Parameter index out of range")
+            p = device.parameters[parameter_index]
+            if not (p.min <= value <= p.max):
+                raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, p.min, p.max, p.name))
+            p.value = value
+            return {
+                "device_name": device.name,
+                "parameter_index": parameter_index,
+                "name": p.name,
+                "value": p.value,
+            }
+        except Exception as e:
+            self.log_message("Error setting return device parameter: " + str(e))
+            raise
+
+    def _load_return_effect(self, return_index, item_uri):
+        """Load a browser item (audio effect) onto a return track by URI."""
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            app = self.application()
+            item = self._find_browser_item_by_uri(app.browser, item_uri)
+            if not item:
+                raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
+            self._song.view.selected_track = track
+            app.browser.load_item(item)
+            return {
+                "loaded": True,
+                "item_name": item.name,
+                "track_name": track.name,
+                "uri": item_uri,
+            }
+        except Exception as e:
+            self.log_message("Error loading return effect: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+
+    def _set_return_track_volume(self, return_index, value):
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            new_value = self._set_mixer_param(track.mixer_device.volume, value)
+            return {"return_index": return_index, "volume": new_value}
+        except Exception as e:
+            self.log_message("Error setting return-track volume: " + str(e))
+            raise
+
+    def _set_return_track_pan(self, return_index, value):
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            new_value = self._set_mixer_param(track.mixer_device.panning, value)
+            return {"return_index": return_index, "panning": new_value}
+        except Exception as e:
+            self.log_message("Error setting return-track pan: " + str(e))
+            raise
+
+    def _set_return_track_mute(self, return_index, mute):
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            track.mute = bool(mute)
+            return {"return_index": return_index, "mute": track.mute}
+        except Exception as e:
+            self.log_message("Error setting return-track mute: " + str(e))
+            raise
+
+    def _set_return_track_solo(self, return_index, solo):
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            track.solo = bool(solo)
+            return {"return_index": return_index, "solo": track.solo}
+        except Exception as e:
+            self.log_message("Error setting return-track solo: " + str(e))
+            raise
+
     def _create_clip(self, track_index, clip_index, length):
         """Create a new MIDI clip in the specified track and clip slot"""
         try:
