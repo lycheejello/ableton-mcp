@@ -204,7 +204,7 @@ class AbletonMCP(ControlSurface):
             "get_track_sends":           (False, lambda p: s._get_track_sends(p.get("track_index", 0))),
             "get_cue_points":            (False, lambda p: s._get_cue_points()),
             "list_arrangement_clips":    (False, lambda p: s._list_arrangement_clips(p.get("track_index", 0))),
-            "get_clip_envelope":         (False, lambda p: s._get_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""))),
+            "get_clip_envelope":         (False, lambda p: s._get_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("is_arrangement", False))),
             "get_clip_notes":            (False, lambda p: s._get_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("is_arrangement", False))),
             "get_browser_item":          (False, lambda p: s._get_browser_item(p.get("uri"), p.get("path"))),
             "get_browser_tree":          (False, lambda p: s.get_browser_tree(p.get("category_type", "all"))),
@@ -251,7 +251,9 @@ class AbletonMCP(ControlSurface):
             "clear_clip_notes":                (True, lambda p: s._clear_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("is_arrangement", False))),
             "replace_clip_notes":              (True, lambda p: s._replace_clip_notes(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []), p.get("is_arrangement", False))),
             "add_clip_envelope_point":         (True, lambda p: s._add_clip_envelope_point(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("time", 0.0), p.get("value", 0.0))),
-            "clear_clip_envelope":             (True, lambda p: s._clear_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""))),
+            "add_clip_envelope_ramp":          (True, lambda p: s._add_clip_envelope_ramp(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("start_time", 0.0), p.get("end_time", 1.0), p.get("start_value", 0.0), p.get("end_value", 1.0), p.get("steps", 64))),
+            "update_arrangement_clip_from_session": (True, lambda p: s._update_arrangement_clip_from_session(p.get("track_index", 0), p.get("arr_clip_index", 0), p.get("session_clip_index", 0))),
+            "clear_clip_envelope":             (True, lambda p: s._clear_clip_envelope(p.get("track_index", 0), p.get("clip_index", 0), p.get("parameter_path", ""), p.get("is_arrangement", False))),
         }
 
     def _process_command(self, command):
@@ -571,6 +573,27 @@ class AbletonMCP(ControlSurface):
             raise Exception("track.duplicate_clip_to_arrangement is not available in this Live version")
         return {"track_index": track_index, "position": position, "arrangement_clip_count": len(track.arrangement_clips)}
 
+    def _update_arrangement_clip_from_session(self, track_index, arr_clip_index, session_clip_index):
+        # Workaround for Live's session→arrangement-copy model: arrangement clips are independent
+        # copies, so editing the source session clip's notes/envelopes doesn't propagate. We delete
+        # the existing arrangement clip and re-place its session source at the same position.
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        track = self._song.tracks[track_index]
+        old_clip = self._get_arrangement_clip(track, arr_clip_index)
+        position = old_clip.start_time
+        if session_clip_index < 0 or session_clip_index >= len(track.clip_slots):
+            raise IndexError("Session clip slot index out of range")
+        slot = track.clip_slots[session_clip_index]
+        if not slot.has_clip:
+            raise Exception("No clip in session slot {0}".format(session_clip_index))
+        try:
+            track.delete_clip(old_clip)
+            track.duplicate_clip_to_arrangement(slot.clip, position)
+        except AttributeError:
+            raise Exception("track.delete_clip / duplicate_clip_to_arrangement not available in this Live version")
+        return {"track_index": track_index, "position": position, "arrangement_clip_count": len(track.arrangement_clips)}
+
     def _create_arrangement_midi_clip(self, track_index, start_time, end_time):
         if track_index < 0 or track_index >= len(self._song.tracks):
             raise IndexError("Track index out of range")
@@ -696,22 +719,12 @@ class AbletonMCP(ControlSurface):
         ]
         return {"note_count": len(notes), "notes": notes}
 
-    def _get_session_clip_for_envelope(self, track_index, clip_index):
-        # Envelope tools are session-only: Clip.automation_envelope() returns None for
-        # arrangement clips, and Live 12's documented Python LOM has no track-level
-        # arrangement-automation write API.
-        if track_index < 0 or track_index >= len(self._song.tracks):
-            raise IndexError("Track index out of range")
-        track = self._song.tracks[track_index]
-        if clip_index < 0 or clip_index >= len(track.clip_slots):
-            raise IndexError("Clip slot index out of range")
-        slot = track.clip_slots[clip_index]
-        if not slot.has_clip:
-            raise Exception("No clip in slot")
-        return track, slot.clip
-
     def _add_clip_envelope_point(self, track_index, clip_index, parameter_path, time, value):
-        track, clip = self._get_session_clip_for_envelope(track_index, clip_index)
+        # Session-only: Live's Clip.create_automation_envelope rejects arrangement clips
+        # ("Not a session clip or parameter belongs to another track"). To get an envelope
+        # onto the timeline, author it on a session clip and use add_session_clip_to_arrangement
+        # (or update_arrangement_clip_from_session to refresh an existing arrangement copy).
+        track, clip = self._get_clip(track_index, clip_index, False)
         param = self._resolve_parameter(track, parameter_path)
         if not (param.min <= value <= param.max):
             raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(value, param.min, param.max, param.name))
@@ -723,13 +736,49 @@ class AbletonMCP(ControlSurface):
                 env = clip.create_automation_envelope(param)
         except AttributeError:
             raise Exception("Clip envelope API not available in this Live version")
-        # insert_step writes a flat-value region; length 0 is a no-op. Extend to clip end so
-        # the point persists until overridden by a later insert_step (breakpoint semantics).
+        # The LOM only exposes insert_step(start, length, value) for writes — no breakpoint API
+        # and no linear interpolation between sparse events. Each call writes a flat region from
+        # `time` to clip end; a later call at a higher `time` overrides the tail of the earlier
+        # region. Net effect: cliff transitions between flat regions. For smooth ramps use
+        # add_clip_envelope_ramp (writes many abutting small steps approximating a curve).
         env.insert_step(time, clip.length - time, value)
         return {"parameter": param.name, "time": time, "value": value}
 
-    def _clear_clip_envelope(self, track_index, clip_index, parameter_path):
-        track, clip = self._get_session_clip_for_envelope(track_index, clip_index)
+    def _add_clip_envelope_ramp(self, track_index, clip_index, parameter_path, start_time, end_time, start_value, end_value, steps):
+        track, clip = self._get_clip(track_index, clip_index, False)
+        param = self._resolve_parameter(track, parameter_path)
+        for v in (start_value, end_value):
+            if not (param.min <= v <= param.max):
+                raise ValueError("value {0} out of range [{1}, {2}] for {3}".format(v, param.min, param.max, param.name))
+        if start_time < 0 or end_time > clip.length or start_time >= end_time:
+            raise ValueError("ramp range [{0}, {1}) out of clip [0, {2})".format(start_time, end_time, clip.length))
+        if steps < 2:
+            raise ValueError("steps must be >= 2")
+        try:
+            env = clip.automation_envelope(param)
+            if env is None:
+                env = clip.create_automation_envelope(param)
+        except AttributeError:
+            raise Exception("Clip envelope API not available in this Live version")
+        duration = end_time - start_time
+        step_len = duration / steps
+        for i in range(steps):
+            t = start_time + i * step_len
+            progress = i / float(steps - 1)
+            v = start_value + (end_value - start_value) * progress
+            env.insert_step(t, step_len, v)
+        return {
+            "parameter": param.name,
+            "start_time": start_time,
+            "end_time": end_time,
+            "start_value": start_value,
+            "end_value": end_value,
+            "steps": steps,
+            "step_length": step_len,
+        }
+
+    def _clear_clip_envelope(self, track_index, clip_index, parameter_path, is_arrangement):
+        track, clip = self._get_clip(track_index, clip_index, is_arrangement)
         param = self._resolve_parameter(track, parameter_path)
         try:
             clip.clear_envelope(param)
@@ -737,8 +786,8 @@ class AbletonMCP(ControlSurface):
             raise Exception("Clip.clear_envelope is not available in this Live version")
         return {"parameter": param.name, "cleared": True}
 
-    def _get_clip_envelope(self, track_index, clip_index, parameter_path):
-        track, clip = self._get_session_clip_for_envelope(track_index, clip_index)
+    def _get_clip_envelope(self, track_index, clip_index, parameter_path, is_arrangement):
+        track, clip = self._get_clip(track_index, clip_index, is_arrangement)
         param = self._resolve_parameter(track, parameter_path)
         env = None
         try:

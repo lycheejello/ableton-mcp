@@ -26,11 +26,11 @@ _MODIFYING_COMMANDS = frozenset({
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
     "start_playback", "stop_playback", "load_instrument_or_effect",
     "load_browser_item",
-    "add_session_clip_to_arrangement", "create_arrangement_midi_clip",
+    "add_session_clip_to_arrangement", "update_arrangement_clip_from_session", "create_arrangement_midi_clip",
     "set_arrangement_clip_position", "set_arrangement_clip_loop",
     "set_arrangement_clip_markers", "delete_arrangement_clip",
     "set_arrangement_loop", "clear_clip_notes", "replace_clip_notes",
-    "add_clip_envelope_point", "clear_clip_envelope",
+    "add_clip_envelope_point", "add_clip_envelope_ramp", "clear_clip_envelope",
     "set_transport_position",
     "delete_session_clip",
     "set_or_delete_cue", "set_cue_name", "place_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
@@ -1051,10 +1051,23 @@ def add_clip_envelope_point(
     Time is clip-local beats. Value is range-checked against the parameter's [min, max].
     The envelope is created on first call; subsequent calls add more points.
 
-    Session clips only. Arrangement-view automation isn't writable through Live 12's
-    documented Python LOM (Clip.automation_envelope returns None for arrangement clips,
-    and there's no track-level write API). To get automation onto the timeline,
-    author it on a session clip then add_session_clip_to_arrangement.
+    Semantics: each call writes a flat region from `time` to clip end. A later call at a higher
+    `time` overrides the tail of the earlier region. Result: cliff transitions between flat
+    levels — useful for sudden value changes (mute drops, sends turning on/off, instant
+    parameter swaps). For smooth fades or curves, use add_clip_envelope_ramp instead.
+
+    SIDE EFFECT: when a session clip with envelopes is placed into the arrangement (via
+    add_session_clip_to_arrangement or update_arrangement_clip_from_session), Live materializes
+    the envelope as TRACK-LANE arrangement automation. The bridge has no read or write API for
+    track-lane automation (LOM doesn't expose it), so the agent can't audit or clean up these
+    side-effect writes. Manual track-lane edits in the same range get overwritten on every
+    refresh.
+
+    Session clips only — Live's LOM rejects envelope creation on arrangement clips
+    ("Not a session clip or parameter belongs to another track"). To get automation
+    onto the timeline: author on a session clip, then add_session_clip_to_arrangement
+    (first placement) or update_arrangement_clip_from_session (refresh an existing
+    arrangement copy after editing the session source).
     """
     return _forward("add_clip_envelope_point", {
         "track_index": track_index,
@@ -1065,31 +1078,104 @@ def add_clip_envelope_point(
     })
 
 @mcp.tool()
+def add_clip_envelope_ramp(
+    ctx: Context, track_index: int, clip_index: int,
+    parameter_path: str, start_time: float, end_time: float,
+    start_value: float, end_value: float, steps: int = 64,
+) -> str:
+    """
+    Write a smooth-feeling ramp on a session clip's automation envelope.
+
+    Live's LOM only exposes flat-region writes (insert_step), not true breakpoints with linear
+    interpolation. This tool approximates a smooth curve by writing N abutting flat steps with
+    progressively interpolated values. Default steps=64 gives ~50ms granularity over a 4-beat
+    ramp at 90 BPM — well below audible-stairstep threshold.
+
+    Parameters:
+    - start_time, end_time: clip-local beats. start_time inclusive, end_time exclusive.
+    - start_value, end_value: parameter values at the ramp endpoints. Range-checked.
+    - steps: number of flat steps to use for the approximation. Bigger = smoother but more
+      LOM calls. 64 is a good default for ramps over 1-4 beats. Drop to 16 for short ramps.
+
+    Session clips only (same arrangement-clip rejection as add_clip_envelope_point). Carries
+    the same TRACK-LANE materialization side effect when placed into the arrangement.
+    """
+    return _forward("add_clip_envelope_ramp", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "parameter_path": parameter_path,
+        "start_time": start_time,
+        "end_time": end_time,
+        "start_value": start_value,
+        "end_value": end_value,
+        "steps": steps,
+    })
+
+@mcp.tool()
 def clear_clip_envelope(
     ctx: Context, track_index: int, clip_index: int,
-    parameter_path: str,
+    parameter_path: str, is_arrangement: bool = False,
 ) -> str:
-    """Remove all envelope points for one parameter on a session clip."""
+    """
+    Remove all envelope points for one parameter on a clip.
+
+    Works on both session clips (default) and arrangement clips
+    (set is_arrangement=True; clip_index is then the arrangement_clips index).
+    """
     return _forward("clear_clip_envelope", {
         "track_index": track_index,
         "clip_index": clip_index,
         "parameter_path": parameter_path,
+        "is_arrangement": is_arrangement,
     })
 
 @mcp.tool()
 def get_clip_envelope(
     ctx: Context, track_index: int, clip_index: int,
-    parameter_path: str,
+    parameter_path: str, is_arrangement: bool = False,
 ) -> str:
     """
-    Inspect a session clip's automation envelope for a parameter. Returns sampled
-    values at integer-beat intervals across the clip — coarse, intended for sanity
-    checks rather than precise round-trips. Live's UI is the source of truth.
+    Inspect a clip's automation envelope for a parameter. Returns sampled values at
+    integer-beat intervals — coarse, intended for sanity checks. Live's UI is the
+    source of truth.
+
+    Works on both session clips (default) and arrangement clips
+    (set is_arrangement=True). For arrangement clips with no envelope present, returns
+    exists=false (Live's LOM returns None rather than raising).
     """
     return _forward("get_clip_envelope", {
         "track_index": track_index,
         "clip_index": clip_index,
         "parameter_path": parameter_path,
+        "is_arrangement": is_arrangement,
+    })
+
+@mcp.tool()
+def update_arrangement_clip_from_session(
+    ctx: Context, track_index: int, arr_clip_index: int, session_clip_index: int,
+) -> str:
+    """
+    Refresh an existing arrangement clip from its session source.
+
+    Live's session-to-arrangement model creates an independent copy: edits to the
+    source session clip's notes/envelopes don't propagate to the placed arrangement
+    copy. This tool deletes the arrangement copy and re-places the session source at
+    the SAME position, so authoring an envelope on the session clip and calling this
+    tool gets the updated envelope onto the timeline.
+
+    Use this when you've edited a session clip and want the change to show up in an
+    already-placed arrangement copy. For first-time placement, use
+    add_session_clip_to_arrangement instead.
+
+    Parameters:
+    - arr_clip_index: index into the track's arrangement_clips list (re-list after
+      mutations — indices shift if other arrangement clips are added/removed).
+    - session_clip_index: clip slot index of the session source.
+    """
+    return _forward("update_arrangement_clip_from_session", {
+        "track_index": track_index,
+        "arr_clip_index": arr_clip_index,
+        "session_clip_index": session_clip_index,
     })
 
 # Main execution
