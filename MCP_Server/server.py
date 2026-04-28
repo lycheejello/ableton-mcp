@@ -28,6 +28,7 @@ _MODIFYING_COMMANDS = frozenset({
     "set_return_track_mute", "set_return_track_solo",
     "set_return_device_parameter", "load_return_effect",
     "set_master_device_parameter", "load_master_effect",
+    "delete_track_device", "delete_return_device", "delete_master_device",
     "create_clip", "add_notes_to_clip", "set_clip_name",
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
     "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -657,6 +658,47 @@ def set_master_device_parameter(
         "parameter_index": parameter_index,
         "value": value,
     })
+
+@mcp.tool()
+def delete_track_device(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Delete a device from a regular track's chain.
+
+    Note: subsequent device indices shift down after deletion. Re-list
+    via list_devices before deleting more from the same chain.
+
+    Parameters:
+    - track_index: Index into song.tracks
+    - device_index: Index of the device to delete
+    """
+    return _forward("delete_track_device", {"track_index": track_index, "device_index": device_index})
+
+@mcp.tool()
+def delete_return_device(ctx: Context, return_index: int, device_index: int) -> str:
+    """
+    Delete a device from a return track's chain.
+
+    Note: subsequent device indices shift down after deletion. Re-list
+    via list_return_devices before deleting more from the same chain.
+
+    Parameters:
+    - return_index: Index into song.return_tracks
+    - device_index: Index of the device to delete
+    """
+    return _forward("delete_return_device", {"return_index": return_index, "device_index": device_index})
+
+@mcp.tool()
+def delete_master_device(ctx: Context, device_index: int) -> str:
+    """
+    Delete a device from the master track's chain.
+
+    Note: subsequent device indices shift down after deletion. Re-list
+    via list_master_devices before deleting more.
+
+    Parameters:
+    - device_index: Index of the device to delete
+    """
+    return _forward("delete_master_device", {"device_index": device_index})
 
 @mcp.tool()
 def load_master_effect(ctx: Context, uri: str) -> str:

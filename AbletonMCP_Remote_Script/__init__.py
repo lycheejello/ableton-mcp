@@ -239,6 +239,9 @@ class AbletonMCP(ControlSurface):
             "get_master_device_parameters":    (False, lambda p: s._get_master_device_parameters(p.get("device_index", 0))),
             "set_master_device_parameter":     (True, lambda p: s._set_master_device_parameter(p.get("device_index", 0), p.get("parameter_index", 0), p.get("value"))),
             "load_master_effect":              (True, lambda p: s._load_master_effect(p.get("item_uri", ""))),
+            "delete_track_device":             (True, lambda p: s._delete_track_device(p.get("track_index", 0), p.get("device_index", 0))),
+            "delete_return_device":            (True, lambda p: s._delete_return_device(p.get("return_index", 0), p.get("device_index", 0))),
+            "delete_master_device":            (True, lambda p: s._delete_master_device(p.get("device_index", 0))),
             "create_clip":                     (True, lambda p: s._create_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("length", 4.0))),
             "add_notes_to_clip":               (True, lambda p: s._add_notes_to_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []))),
             "set_clip_name":                   (True, lambda p: s._set_clip_name(p.get("track_index", 0), p.get("clip_index", 0), p.get("name", ""))),
@@ -1556,6 +1559,45 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error setting master device parameter: " + str(e))
+            raise
+
+    def _delete_track_device(self, track_index, device_index):
+        """Delete a device from a regular track. Subsequent device indices shift down — re-list before deleting more."""
+        try:
+            track = self._get_track_or_raise(track_index)
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            name = track.devices[device_index].name
+            track.delete_device(device_index)
+            return {"track_index": track_index, "deleted_index": device_index, "name": name, "remaining": len(track.devices)}
+        except Exception as e:
+            self.log_message("Error deleting track device: " + str(e))
+            raise
+
+    def _delete_return_device(self, return_index, device_index):
+        """Delete a device from a return track. Subsequent device indices shift down."""
+        try:
+            track = self._get_return_track_or_raise(return_index)
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            name = track.devices[device_index].name
+            track.delete_device(device_index)
+            return {"return_index": return_index, "deleted_index": device_index, "name": name, "remaining": len(track.devices)}
+        except Exception as e:
+            self.log_message("Error deleting return device: " + str(e))
+            raise
+
+    def _delete_master_device(self, device_index):
+        """Delete a device from the master track. Subsequent device indices shift down."""
+        try:
+            track = self._song.master_track
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            name = track.devices[device_index].name
+            track.delete_device(device_index)
+            return {"deleted_index": device_index, "name": name, "remaining": len(track.devices)}
+        except Exception as e:
+            self.log_message("Error deleting master device: " + str(e))
             raise
 
     def _load_master_effect(self, item_uri):
