@@ -244,7 +244,7 @@ class AbletonMCP(ControlSurface):
             "delete_master_device":            (True, lambda p: s._delete_master_device(p.get("device_index", 0))),
             "create_clip":                     (True, lambda p: s._create_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("length", 4.0))),
             "add_notes_to_clip":               (True, lambda p: s._add_notes_to_clip(p.get("track_index", 0), p.get("clip_index", 0), p.get("notes", []))),
-            "set_clip_name":                   (True, lambda p: s._set_clip_name(p.get("track_index", 0), p.get("clip_index", 0), p.get("name", ""))),
+            "set_clip_name":                   (True, lambda p: s._set_clip_name(p.get("track_index", 0), p.get("clip_index", 0), p.get("name", ""), p.get("is_arrangement", False))),
             "set_tempo":                       (True, lambda p: s._set_tempo(p.get("tempo", 120.0))),
             "fire_clip":                       (True, lambda p: s._fire_clip(p.get("track_index", 0), p.get("clip_index", 0))),
             "stop_clip":                       (True, lambda p: s._stop_clip(p.get("track_index", 0), p.get("clip_index", 0))),
@@ -626,13 +626,14 @@ class AbletonMCP(ControlSurface):
         if not track.has_midi_input:
             raise Exception("Track {0} is not a MIDI track".format(track_index))
         try:
-            clip = track.create_midi_clip(start_time, end_time)
+            clip = track.create_midi_clip(start_time, end_time - start_time)
         except AttributeError:
             raise Exception("track.create_midi_clip is not available in this Live version")
         return {
             "track_index": track_index,
             "start_time": start_time,
             "end_time": end_time,
+            "length": end_time - start_time,
             "name": clip.name if clip else None,
         }
 
@@ -1678,29 +1679,12 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error adding notes to clip: " + str(e))
             raise
     
-    def _set_clip_name(self, track_index, clip_index, name):
-        """Set the name of a clip"""
+    def _set_clip_name(self, track_index, clip_index, name, is_arrangement=False):
+        """Set the name of a session or arrangement clip."""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-            
-            track = self._song.tracks[track_index]
-            
-            if clip_index < 0 or clip_index >= len(track.clip_slots):
-                raise IndexError("Clip index out of range")
-            
-            clip_slot = track.clip_slots[clip_index]
-            
-            if not clip_slot.has_clip:
-                raise Exception("No clip in slot")
-            
-            clip = clip_slot.clip
+            _, clip = self._get_clip(track_index, clip_index, is_arrangement)
             clip.name = name
-            
-            result = {
-                "name": clip.name
-            }
-            return result
+            return {"name": clip.name}
         except Exception as e:
             self.log_message("Error setting clip name: " + str(e))
             raise
@@ -1795,12 +1779,18 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _set_transport_position(self, beats):
-        """Move the arrangement cursor to a given beat position."""
+        """Move the arrangement cursor to a given beat position.
+
+        Live commits `current_song_time` on the next tick, so a same-frame
+        readback is stale (returns the prior cursor position). We return the
+        requested value; call get_transport_state on a later tick for ground
+        truth.
+        """
         try:
             if beats < 0:
                 raise ValueError("beats must be >= 0")
             self._song.current_song_time = float(beats)
-            return {"song_time": self._song.current_song_time}
+            return {"requested_beats": float(beats)}
         except Exception as e:
             self.log_message("Error setting transport position: " + str(e))
             raise

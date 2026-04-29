@@ -782,19 +782,21 @@ def get_clip_notes(
     })
 
 @mcp.tool()
-def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) -> str:
+def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str, is_arrangement: bool = False) -> str:
     """
-    Set the name of a clip.
+    Set the name of a session or arrangement clip.
 
     Parameters:
     - track_index: The index of the track containing the clip
-    - clip_index: The index of the clip slot containing the clip
+    - clip_index: Session clip-slot index, or arrangement clip index when is_arrangement=True
     - name: The new name for the clip
+    - is_arrangement: True to address an arrangement clip; False (default) for session
     """
     return _forward("set_clip_name", {
         "track_index": track_index,
         "clip_index": clip_index,
         "name": name,
+        "is_arrangement": is_arrangement,
     })
 
 @mcp.tool()
@@ -938,6 +940,10 @@ def set_transport_position(ctx: Context, beats: float) -> str:
 
     Pair with start_playback for "play from beat N" workflows; or use
     start_playback(from_beats=...) directly to do both in one call.
+
+    Returns {requested_beats: <beats>} — Live commits the cursor on the next
+    tick, so the same-frame readback would lie. Call get_transport_state on
+    a later tick for the actual cursor.
     """
     return _forward("set_transport_position", {"beats": beats})
 
