@@ -248,7 +248,7 @@ class AbletonMCP(ControlSurface):
             "set_tempo":                       (True, lambda p: s._set_tempo(p.get("tempo", 120.0))),
             "fire_clip":                       (True, lambda p: s._fire_clip(p.get("track_index", 0), p.get("clip_index", 0))),
             "stop_clip":                       (True, lambda p: s._stop_clip(p.get("track_index", 0), p.get("clip_index", 0))),
-            "start_playback":                  (True, lambda p: s._start_playback(p.get("from_beats"))),
+            "start_playback":                  (False, lambda p: s._start_playback(p.get("from_beats"))),
             "stop_playback":                   (True, lambda p: s._stop_playback()),
             "set_transport_position":          (True, lambda p: s._set_transport_position(p.get("beats", 0.0))),
             "set_or_delete_cue":               (True, lambda p: s._set_or_delete_cue()),
@@ -1753,17 +1753,64 @@ class AbletonMCP(ControlSurface):
     
     
     def _start_playback(self, from_beats=None):
-        """Start playing. If from_beats is given, scrub the arrangement cursor first."""
-        try:
-            if from_beats is not None:
-                if from_beats < 0:
-                    raise ValueError("from_beats must be >= 0")
-                self._song.current_song_time = float(from_beats)
+        """Start playing. If `from_beats` matches a cue, play anchors there.
+
+        `start_playing()` plays from Live's internal startmarker, which is
+        independent of `current_song_time`. The only LOM-exposed setter for
+        the startmarker is `CuePoint.jump()`. So:
+
+        * `from_beats=None`: plain `start_playing()` (uses current
+          startmarker — same as Live's spacebar).
+        * `from_beats=N` where a cue sits at N: `cue.jump()` then
+          `start_playing()` — anchored, plays from N.
+        * `from_beats=N` with no cue at N: best-effort. We move the cursor
+          and call `start_playing()`, but the startmarker may be elsewhere
+          — playback may not begin at N. Place a cue at N first
+          (`place_cue`) for guaranteed anchoring. The response flag
+          `play_anchor_updated` reports which path ran. SZO-64.
+        """
+        if from_beats is None:
             self._song.start_playing()
-            return {"playing": self._song.is_playing, "song_time": self._song.current_song_time}
-        except Exception as e:
-            self.log_message("Error starting playback: " + str(e))
-            raise
+            return {"playing": True, "requested_beats": None, "play_anchor_updated": False}
+
+        if from_beats < 0:
+            raise ValueError("from_beats must be >= 0")
+        target = float(from_beats)
+        for cue in self._song.cue_points:
+            if abs(cue.time - target) < 1e-6:
+                cue.jump()
+                if not self._song.is_playing:
+                    self._song.start_playing()
+                return {"playing": True, "requested_beats": target, "play_anchor_updated": True}
+        self._song.current_song_time = target
+        if not self._song.is_playing:
+            self._song.start_playing()
+        return {"playing": True, "requested_beats": target, "play_anchor_updated": False}
+
+    def _run_on_main(self, fn, wait=2.0):
+        """Schedule fn on Live's main thread and block until it completes.
+
+        Used by handlers that run off-main and need to interleave main-thread Live ops
+        with wall-clock sleeps (so Live actually commits state between scheduled ticks).
+        """
+        ev = threading.Event()
+        box = {}
+        def wrapper():
+            try:
+                box["v"] = fn()
+            except Exception as e:
+                box["err"] = str(e)
+            finally:
+                ev.set()
+        try:
+            self.schedule_message(0, wrapper)
+        except AssertionError:
+            wrapper()
+        if not ev.wait(timeout=wait):
+            raise RuntimeError("main-thread step timed out")
+        if "err" in box:
+            raise RuntimeError(box["err"])
+        return box.get("v")
 
     def _stop_playback(self):
         """Stop playing the session"""
@@ -1779,18 +1826,39 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _set_transport_position(self, beats):
-        """Move the arrangement cursor to a given beat position.
+        """Move the arrangement cursor to `beats`. Also updates the
+        play-start anchor if a cue exists at `beats`.
 
-        Live commits `current_song_time` on the next tick, so a same-frame
-        readback is stale (returns the prior cursor position). We return the
-        requested value; call get_transport_state on a later tick for ground
-        truth.
+        Live tracks two distinct positions: `current_song_time` (the visual
+        cursor) and an internal startmarker that `start_playing()` plays
+        from — including the auto-start triggered by toggling record_mode
+        on an armed track. Assigning `current_song_time` only moves the
+        cursor; the startmarker stays where it was, so a subsequent
+        `start_playing()` plays from the prior position. SZO-64.
+
+        The only LOM-exposed setter for the startmarker is
+        `CuePoint.jump()`. When a cue exists at the target beat we use it,
+        which updates both. Otherwise we fall back to cursor-only — for
+        RT-capture or play-from-N scenarios at non-cue beats, place a cue
+        at the target first (cues at section boundaries are standard
+        practice and cover the common case).
+
+        Return value is the requested beat (no lying readback — Live
+        commits cursor writes asynchronously).
         """
         try:
             if beats < 0:
                 raise ValueError("beats must be >= 0")
-            self._song.current_song_time = float(beats)
-            return {"requested_beats": float(beats)}
+            target = float(beats)
+            anchored = False
+            for cue in self._song.cue_points:
+                if abs(cue.time - target) < 1e-6:
+                    cue.jump()
+                    anchored = True
+                    break
+            if not anchored:
+                self._song.current_song_time = target
+            return {"requested_beats": target, "play_anchor_updated": anchored}
         except Exception as e:
             self.log_message("Error setting transport position: " + str(e))
             raise

@@ -920,8 +920,22 @@ def start_playback(ctx: Context, from_beats: float = None) -> str:
     Start playing the Ableton session.
 
     Parameters:
-    - from_beats: optional arrangement-time position (in beats) to scrub to
-      before starting playback. Omit to play from Live's current cursor.
+    - from_beats: optional beat position to play from. Omit to play from
+      Live's current play-start anchor (same as the spacebar).
+
+    Live tracks two distinct positions: the visual cursor (`current_song_time`)
+    and an internal play-start anchor that `start_playing()` actually plays
+    from. The only LOM-exposed setter for the play-start anchor is
+    `CuePoint.jump()`, so:
+
+    * If `from_beats` matches an existing cue → playback is anchored at that
+      cue (response: play_anchor_updated=true).
+    * If `from_beats` is off-cue → best-effort: the cursor moves but the
+      anchor doesn't, so playback may begin somewhere other than `from_beats`
+      (response: play_anchor_updated=false). Place a cue at the target via
+      `place_cue` first for guaranteed anchoring.
+
+    Returns {playing, requested_beats, play_anchor_updated}.
     """
     params = {}
     if from_beats is not None:
@@ -938,12 +952,16 @@ def set_transport_position(ctx: Context, beats: float) -> str:
     """
     Move the arrangement cursor to a beat position without starting playback.
 
-    Pair with start_playback for "play from beat N" workflows; or use
-    start_playback(from_beats=...) directly to do both in one call.
+    If a cue exists at `beats`, also updates Live's play-start anchor (so a
+    subsequent `start_playback` — including the auto-start triggered by
+    toggling record_mode on an armed track — plays from `beats`). If no cue
+    is at `beats`, only the cursor moves; the anchor stays where it was.
+    Place a cue first via `place_cue` for RT-capture or play-from-N flows
+    where exact start position matters. SZO-64.
 
-    Returns {requested_beats: <beats>} — Live commits the cursor on the next
-    tick, so the same-frame readback would lie. Call get_transport_state on
-    a later tick for the actual cursor.
+    Returns {requested_beats, play_anchor_updated}. Live commits the cursor
+    write on the next tick — same-frame readback lies; call
+    get_transport_state on a later tick for the actual cursor.
     """
     return _forward("set_transport_position", {"beats": beats})
 
