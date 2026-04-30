@@ -40,7 +40,7 @@ _MODIFYING_COMMANDS = frozenset({
     "add_clip_envelope_point", "add_clip_envelope_ramp", "clear_clip_envelope",
     "set_transport_position",
     "delete_session_clip",
-    "set_or_delete_cue", "set_cue_name", "place_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
+    "set_or_delete_cue", "set_cue_name", "place_cue", "delete_cue", "jump_to_cue", "jump_to_next_cue", "jump_to_prev_cue",
     "undo", "redo", "begin_undo_step", "end_undo_step",
 })
 
@@ -1008,6 +1008,28 @@ def place_cue(ctx: Context, beat: float, name: str = "") -> str:
     - name: Optional name. Empty string leaves the cue's existing name untouched.
     """
     return _forward("place_cue", {"beat": beat, "name": name or None})
+
+@mcp.tool()
+def delete_cue(ctx: Context, cue_index: int) -> str:
+    """
+    Delete the cue at the given index. Symmetric with `place_cue`.
+
+    Decoupled from transport — stops playback if running, sequences cursor
+    commits across main-thread ticks (so Live actually moves the cursor
+    before the toggle), then restores the user's prior cursor + play state.
+
+    Prefer this over (set_transport_position → set_or_delete_cue): the raw
+    toggle is fragile under playback because the cursor advances past the
+    target before Live processes the toggle, dropping a stray cue at a
+    fractional beat instead of deleting the intended one. SZO-59.
+
+    Parameters:
+    - cue_index: Index into get_cue_points. Indices shift on add/delete —
+      re-list immediately before calling.
+
+    Returns {deleted_index, name, time, remaining}.
+    """
+    return _forward("delete_cue", {"cue_index": cue_index})
 
 @mcp.tool()
 def set_cue_name(ctx: Context, cue_index: int, name: str) -> str:

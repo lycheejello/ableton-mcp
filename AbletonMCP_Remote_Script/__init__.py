@@ -254,6 +254,7 @@ class AbletonMCP(ControlSurface):
             "set_or_delete_cue":               (True, lambda p: s._set_or_delete_cue()),
             "set_cue_name":                    (True, lambda p: s._set_cue_name(p.get("cue_index", 0), p.get("name", ""))),
             "place_cue":                       (False, lambda p: s._place_cue(p.get("beat", 0.0), p.get("name"))),
+            "delete_cue":                      (False, lambda p: s._delete_cue(p.get("cue_index", 0))),
             "jump_to_cue":                     (True, lambda p: s._jump_to_cue(p.get("cue_index", 0))),
             "jump_to_next_cue":                (True, lambda p: s._jump_to_next_cue()),
             "jump_to_prev_cue":                (True, lambda p: s._jump_to_prev_cue()),
@@ -1178,6 +1179,86 @@ class AbletonMCP(ControlSurface):
             if state["was_playing"]:
                 self._song.start_playing()
             return result
+
+        return run_on_main(s3)
+
+    def _delete_cue(self, cue_index):
+        """Delete the cue at `cue_index`. Decoupled from transport — stops
+        playback if running, sequences cursor commits across main-thread
+        ticks (so Live actually moves the cursor before the toggle), then
+        restores the user's prior cursor + play state. SZO-59.
+
+        Necessary because the raw `set_or_delete_cue` toggle is fragile
+        under playback: by the time Live processes the toggle the cursor
+        has advanced past the target, so the toggle creates a stray cue
+        at the cursor's actual (off-grid) position rather than deleting
+        the intended one. Same dance as `place_cue` (SZO-28).
+        """
+        cues = self._song.cue_points
+        if cue_index < 0 or cue_index >= len(cues):
+            raise IndexError("Cue index out of range")
+        target = float(cues[cue_index].time)
+        target_name = cues[cue_index].name
+        state = {}
+
+        def run_on_main(fn, wait=2.0):
+            ev = threading.Event()
+            box = {}
+            def wrapper():
+                try:
+                    box["v"] = fn()
+                except Exception as e:
+                    box["err"] = str(e)
+                finally:
+                    ev.set()
+            try:
+                self.schedule_message(0, wrapper)
+            except AssertionError:
+                wrapper()
+            if not ev.wait(timeout=wait):
+                raise RuntimeError("delete_cue: main-thread step timed out")
+            if "err" in box:
+                raise RuntimeError(box["err"])
+            return box.get("v")
+
+        # Step 1: snapshot transport, stop playback, scrub cursor to target.
+        def s1():
+            state["was_playing"] = self._song.is_playing
+            state["prior_time"] = self._song.current_song_time
+            state["cue_count_before"] = len(self._song.cue_points)
+            self._song.stop_playing()
+            self._song.current_song_time = target
+
+        run_on_main(s1)
+        time.sleep(0.1)
+
+        # Step 2: toggle (cursor should have committed at target by now).
+        def s2():
+            self._song.set_or_delete_cue()
+        run_on_main(s2)
+
+        time.sleep(0.05)
+
+        # Step 3: verify the toggle actually deleted, restore transport.
+        def s3():
+            new_count = len(self._song.cue_points)
+            if new_count >= state["cue_count_before"]:
+                # Toggle didn't delete — likely cursor commit lost the race.
+                # Re-toggle to undo any stray creation, then bail.
+                self._song.set_or_delete_cue()
+                self._song.current_song_time = state["prior_time"]
+                if state["was_playing"]:
+                    self._song.start_playing()
+                raise RuntimeError("delete_cue: toggle did not remove the cue (cursor commit race)")
+            self._song.current_song_time = state["prior_time"]
+            if state["was_playing"]:
+                self._song.start_playing()
+            return {
+                "deleted_index": cue_index,
+                "name": target_name,
+                "time": target,
+                "remaining": new_count,
+            }
 
         return run_on_main(s3)
 
