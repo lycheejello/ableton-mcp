@@ -217,6 +217,8 @@ class AbletonMCP(ControlSurface):
             "set_song_record_mode":            (True, lambda p: s._set_song_record_mode(p.get("enabled", False))),
             "get_input_routing":               (False, lambda p: s._get_input_routing(p.get("track_index", 0))),
             "set_input_routing":               (True, lambda p: s._set_input_routing(p.get("track_index", 0), p.get("type_name"), p.get("channel_name"))),
+            "get_output_routing":              (False, lambda p: s._get_output_routing(p.get("track_index", 0))),
+            "set_output_routing":              (True, lambda p: s._set_output_routing(p.get("track_index", 0), p.get("type_name"), p.get("channel_name"))),
             "set_track_name":                  (True, lambda p: s._set_track_name(p.get("track_index", 0), p.get("name", ""))),
             "set_track_volume":                (True, lambda p: s._set_track_volume(p.get("track_index", 0), p.get("value"))),
             "set_track_pan":                   (True, lambda p: s._set_track_pan(p.get("track_index", 0), p.get("value"))),
@@ -961,6 +963,75 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error setting input routing: " + str(e))
+            raise
+
+    def _get_output_routing(self, track_index):
+        """Read a track's current output routing + the discoverable lists of available types/channels.
+
+        For MIDI tracks: routing destination is "MIDI To" (e.g. an external MIDI port like a P-515).
+        For audio tracks: routing destination is "Audio To" (e.g. master, ext outs, sends-only).
+        Same LOM surface for both. Mirrors _get_input_routing. SZO-76.
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            cur_type = getattr(track, "output_routing_type", None)
+            cur_chan = getattr(track, "output_routing_channel", None)
+            avail_types = getattr(track, "available_output_routing_types", None) or []
+            avail_chans = getattr(track, "available_output_routing_channels", None) or []
+            return {
+                "track_index": track_index,
+                "current_type": getattr(cur_type, "display_name", None),
+                "current_channel": getattr(cur_chan, "display_name", None),
+                "available_types": [getattr(t, "display_name", None) for t in avail_types],
+                "available_channels": [getattr(c, "display_name", None) for c in avail_chans],
+            }
+        except Exception as e:
+            self.log_message("Error getting output routing: " + str(e))
+            raise
+
+    def _set_output_routing(self, track_index, type_name, channel_name):
+        """Set a track's output routing by display_name. Pass None to leave a side untouched. SZO-76.
+
+        Same call for MIDI Out (MIDI tracks → external MIDI ports / channels) and
+        Audio To (audio tracks → master / ext outs / sends-only). Same async-readback
+        caveat as set_input_routing — the assignment commits on the next tick; the
+        return value reads back current state (may be stale on cold call).
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if type_name is not None:
+                avail_types = list(track.available_output_routing_types)
+                match = None
+                for t in avail_types:
+                    if getattr(t, "display_name", None) == type_name:
+                        match = t
+                        break
+                if match is None:
+                    names = [getattr(t, "display_name", None) for t in avail_types]
+                    raise ValueError("output routing type '{0}' not in available {1}".format(type_name, names))
+                track.output_routing_type = match
+            if channel_name is not None:
+                avail_chans = list(track.available_output_routing_channels)
+                match = None
+                for c in avail_chans:
+                    if getattr(c, "display_name", None) == channel_name:
+                        match = c
+                        break
+                if match is None:
+                    names = [getattr(c, "display_name", None) for c in avail_chans]
+                    raise ValueError("output routing channel '{0}' not in available {1}".format(channel_name, names))
+                track.output_routing_channel = match
+            return {
+                "track_index": track_index,
+                "current_type": getattr(track.output_routing_type, "display_name", None),
+                "current_channel": getattr(track.output_routing_channel, "display_name", None),
+            }
+        except Exception as e:
+            self.log_message("Error setting output routing: " + str(e))
             raise
 
     def _set_track_name(self, track_index, name):

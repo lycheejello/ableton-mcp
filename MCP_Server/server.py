@@ -19,7 +19,7 @@ logger = logging.getLogger("AbletonMCPServer")
 # COMMANDS registry (AbletonMCP_Remote_Script/__init__.py).
 _MODIFYING_COMMANDS = frozenset({
     "create_midi_track", "create_audio_track", "delete_track", "set_track_arm",
-    "set_song_record_mode", "set_input_routing",
+    "set_song_record_mode", "set_input_routing", "set_output_routing",
     "set_track_name",
     "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
     "set_track_send",
@@ -379,6 +379,41 @@ def set_input_routing(ctx: Context, track_index: int, type_name: str = None, cha
     if channel_name is not None:
         payload["channel_name"] = channel_name
     return _forward("set_input_routing", payload)
+
+@mcp.tool()
+def get_output_routing(ctx: Context, track_index: int) -> str:
+    """
+    Read a track's current output routing + the discoverable lists of available types/channels.
+
+    For MIDI tracks: routing is "MIDI To" — destinations include external MIDI ports
+    (e.g. "Yamaha P-515"), other tracks (for MIDI-routing chains), or "No Output".
+    For audio tracks: routing is "Audio To" — destinations include "Master", external
+    audio outputs, or "Sends Only".
+
+    Returns current_type / current_channel + available_types / available_channels (display names).
+    Use this to discover the right type_name + channel_name to pass to set_output_routing.
+    SZO-76.
+    """
+    return _forward("get_output_routing", {"track_index": track_index})
+
+@mcp.tool()
+def set_output_routing(ctx: Context, track_index: int, type_name: str = None, channel_name: str = None) -> str:
+    """
+    Set a track's output routing (MIDI Out for MIDI tracks, Audio To for audio tracks)
+    by display_name. Symmetric with set_input_routing. SZO-76.
+
+    For wiring a MIDI track to a hardware instrument (e.g. P-515): set type_name to
+    the MIDI port's display name and channel_name to the desired channel ("Ch. 1").
+
+    Pass None for either argument to leave that side untouched. Errors with the list
+    of available names if the requested name isn't a valid option.
+    """
+    payload = {"track_index": track_index}
+    if type_name is not None:
+        payload["type_name"] = type_name
+    if channel_name is not None:
+        payload["channel_name"] = channel_name
+    return _forward("set_output_routing", payload)
 
 @mcp.tool()
 def set_track_name(ctx: Context, track_index: int, name: str) -> str:
